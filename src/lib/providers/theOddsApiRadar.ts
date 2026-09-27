@@ -34,9 +34,11 @@ export type RadarWindowResult = {
   from: string;
   to: string;
   sportsChecked: number;
+  sportStates: RadarSportWindow[];
   activeSports: RadarSportWindow[];
   quota: { remaining: number | null; used: number | null; lastCost: number | null };
   errors: string[];
+  fullInventory: boolean;
 };
 
 function numberHeader(headers: Headers, name: string): number | null {
@@ -117,17 +119,32 @@ function eventHash(events: RadarEvent[]) {
   return createHash("sha1").update(normalized).digest("hex").slice(0, 20);
 }
 
-export async function fetchRadarWindow(windowMinutes = 90): Promise<RadarWindowResult> {
+export async function fetchRadarWindow(
+  windowMinutes = 90,
+  cachedSportKeys?: string[],
+): Promise<RadarWindowResult> {
   const now = Date.now();
   const from = new Date(now + 5 * 60_000).toISOString();
   const to = new Date(now + Math.max(15, windowMinutes) * 60_000).toISOString();
-  const { sports, quota } = await fetchActiveSports();
-  const activeSports: RadarSportWindow[] = [];
-  const errors: string[] = [];
+  const fullInventory = !cachedSportKeys;
 
-  // The provider currently allows 30 req/s on paid plans, but recommends staying well below it.
-  // Four requests every ~500 ms keeps the free radar around 8 req/s and retries transient 429s.
+  let sports: Array<Pick<ApiSport, "key" | "title" | "group">> = [];
+  let quota = { remaining: null, used: null, lastCost: null } as RadarWindowResult["quota"];
+
+  if (fullInventory) {
+    const inventory = await fetchActiveSports();
+    sports = inventory.sports;
+    quota = inventory.quota;
+  } else {
+    sports = [...new Set(cachedSportKeys)]
+      .filter((key) => /^[a-z0-9_]+$/.test(key))
+      .map((key) => ({ key, title: key, group: "Cached active sports" }));
+  }
+
+  const sportStates: RadarSportWindow[] = [];
+  const errors: string[] = [];
   const concurrency = 4;
+
   for (let index = 0; index < sports.length; index += concurrency) {
     const batch = sports.slice(index, index + concurrency);
     const results = await Promise.allSettled(
@@ -141,22 +158,34 @@ export async function fetchRadarWindow(windowMinutes = 90): Promise<RadarWindowR
       }
 
       const { sport, events } = result.value;
-      if (events.length === 0) continue;
       const ordered = [...events].sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
-      activeSports.push({
+      const title = ordered[0]?.sport_title || sport.title;
+      sportStates.push({
         key: sport.key,
-        title: sport.title,
+        title,
         group: sport.group,
         eventCount: ordered.length,
         eventHash: eventHash(ordered),
-        firstStart: ordered[0].commence_time,
-        lastStart: ordered[ordered.length - 1].commence_time,
+        firstStart: ordered[0]?.commence_time ?? "",
+        lastStart: ordered[ordered.length - 1]?.commence_time ?? "",
       });
     }
 
     if (index + concurrency < sports.length) await sleep(500);
   }
 
-  activeSports.sort((a, b) => Date.parse(a.firstStart) - Date.parse(b.firstStart));
-  return { from, to, sportsChecked: sports.length, activeSports, quota, errors };
+  const activeSports = sportStates
+    .filter((sport) => sport.eventCount > 0)
+    .sort((a, b) => Date.parse(a.firstStart) - Date.parse(b.firstStart));
+
+  return {
+    from,
+    to,
+    sportsChecked: sports.length,
+    sportStates,
+    activeSports,
+    quota,
+    errors,
+    fullInventory,
+  };
 }
