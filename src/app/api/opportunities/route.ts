@@ -1,4 +1,3 @@
-import { DEMO_OPPORTUNITIES } from "@/data/demo";
 import { fetchFrenchH2HOpportunities } from "@/lib/providers/theOddsApi";
 
 export async function GET(request: Request) {
@@ -10,9 +9,10 @@ export async function GET(request: Request) {
     return Response.json({
       provider,
       demo: true,
+      liveConfigured: false,
       generatedAt: new Date().toISOString(),
       quota: null,
-      opportunities: DEMO_OPPORTUNITIES
+      opportunities: []
     });
   }
 
@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     return Response.json({
       provider,
       demo: false,
+      liveConfigured: true,
       generatedAt: new Date().toISOString(),
       ...result
     });
