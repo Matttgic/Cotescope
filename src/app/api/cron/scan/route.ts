@@ -12,12 +12,15 @@ import {
   SERVER_DETECTION_OWNER_HASH,
   SYSTEM_ODDS_SCAN_PREFIX,
   SYSTEM_QUOTA_OPPORTUNITY_ID,
+  SYSTEM_RADAR_CYCLE_OPPORTUNITY_ID,
   SYSTEM_RADAR_PREFIX,
 } from "@/lib/serverTracker";
 
 const MIN_EV_PCT = 2;
 const MAX_STANDARD_ODDS = 4;
 const RADAR_WINDOW_MINUTES = 90;
+const FULL_RADAR_INTERVAL_MS = 60 * 60 * 1000;
+const ACTIVE_RADAR_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const PAID_SCAN_COOLDOWN_MS = 60 * 60 * 1000;
 const FINAL_REFRESH_LEAD_MS = 20 * 60 * 1000;
 const FINAL_REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
@@ -41,6 +44,7 @@ type PaidScanMarker = {
 type MarkerMaps = {
   radar: Map<string, RadarMarker>;
   paid: Map<string, PaidScanMarker>;
+  fullRadarAt: number;
 };
 
 async function readQuotaState() {
@@ -64,24 +68,33 @@ async function readQuotaState() {
 
 async function readMarkerMaps(): Promise<MarkerMaps> {
   const pool = getDbPool();
-  if (!pool) return { radar: new Map(), paid: new Map() };
+  if (!pool) return { radar: new Map(), paid: new Map(), fullRadarAt: 0 };
   const result = await pool.query(
     `SELECT opportunity_id, updated_at, stake, selection
        FROM public.bet_history
       WHERE owner_hash = $1
         AND (
           LEFT(opportunity_id, LENGTH($2)) = $2 OR
-          LEFT(opportunity_id, LENGTH($3)) = $3
+          LEFT(opportunity_id, LENGTH($3)) = $3 OR
+          opportunity_id = $4
         )`,
-    [SERVER_DETECTION_OWNER_HASH, SYSTEM_RADAR_PREFIX, SYSTEM_ODDS_SCAN_PREFIX],
+    [
+      SERVER_DETECTION_OWNER_HASH,
+      SYSTEM_RADAR_PREFIX,
+      SYSTEM_ODDS_SCAN_PREFIX,
+      SYSTEM_RADAR_CYCLE_OPPORTUNITY_ID,
+    ],
   );
 
   const radar = new Map<string, RadarMarker>();
   const paid = new Map<string, PaidScanMarker>();
+  let fullRadarAt = 0;
   for (const row of result.rows as Array<Record<string, unknown>>) {
     const opportunityId = String(row.opportunity_id ?? "");
     const updatedAt = Date.parse(String(row.updated_at)) || 0;
-    if (opportunityId.startsWith(SYSTEM_RADAR_PREFIX)) {
+    if (opportunityId === SYSTEM_RADAR_CYCLE_OPPORTUNITY_ID) {
+      fullRadarAt = updatedAt;
+    } else if (opportunityId.startsWith(SYSTEM_RADAR_PREFIX)) {
       radar.set(opportunityId.slice(SYSTEM_RADAR_PREFIX.length), {
         eventCount: Number(row.stake) || 0,
         eventHash: String(row.selection ?? ""),
@@ -91,7 +104,7 @@ async function readMarkerMaps(): Promise<MarkerMaps> {
       paid.set(opportunityId.slice(SYSTEM_ODDS_SCAN_PREFIX.length), { updatedAt });
     }
   }
-  return { radar, paid };
+  return { radar, paid, fullRadarAt };
 }
 
 function stableDetectionId(opportunityId: string) {
@@ -153,12 +166,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [previousQuota, markers, radar] = await Promise.all([
-      readQuotaState(),
-      readMarkerMaps(),
-      fetchRadarWindow(RADAR_WINDOW_MINUTES),
-    ]);
+    const [previousQuota, markers] = await Promise.all([readQuotaState(), readMarkerMaps()]);
+    const nowMs = Date.now();
+    const fullRadarDue = !markers.fullRadarAt || nowMs - markers.fullRadarAt >= FULL_RADAR_INTERVAL_MS;
+    const cachedActiveSportKeys = fullRadarDue
+      ? undefined
+      : [...markers.radar.entries()]
+          .filter(([, marker]) => marker.eventCount > 0 && nowMs - marker.updatedAt <= ACTIVE_RADAR_MAX_AGE_MS)
+          .map(([sportKey]) => sportKey);
 
+    const radar = await fetchRadarWindow(RADAR_WINDOW_MINUTES, cachedActiveSportKeys);
     let currentUsed = radar.quota.used ?? previousQuota?.used ?? 0;
     let currentRemaining = radar.quota.remaining ?? previousQuota?.remaining ?? 0;
     const paidScans: Array<{ sportKey: string; reason: string; cost: number | null }> = [];
@@ -196,7 +213,21 @@ export async function GET(request: NextRequest) {
       await client.query("BEGIN");
       await upsertQuotaState(client, { used: currentUsed, remaining: currentRemaining }, now);
 
-      for (const sport of radar.activeSports) {
+      if (radar.fullInventory) {
+        await client.query(
+          `INSERT INTO public.bet_history
+            (id, owner_hash, opportunity_id, created_at, updated_at, sport, competition, event, market,
+             selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status)
+           VALUES ('system-radar-cycle',$1,$2,$3,$3,'Autre','System','CoteScope full radar','radar_cycle',
+                   'hourly','The Odds API',1.01,$4,0,0,'open')
+           ON CONFLICT (owner_hash, opportunity_id) DO UPDATE SET
+             updated_at = EXCLUDED.updated_at,
+             stake = EXCLUDED.stake`,
+          [SERVER_DETECTION_OWNER_HASH, SYSTEM_RADAR_CYCLE_OPPORTUNITY_ID, now, radar.sportsChecked],
+        );
+      }
+
+      for (const sport of radar.sportStates) {
         await client.query(
           `INSERT INTO public.bet_history
             (id, owner_hash, opportunity_id, created_at, updated_at, sport, competition, event, market,
@@ -214,7 +245,7 @@ export async function GET(request: NextRequest) {
             `${SYSTEM_RADAR_PREFIX}${sport.key}`,
             now,
             sport.title,
-            `${sport.firstStart} → ${sport.lastStart}`,
+            sport.eventCount > 0 ? `${sport.firstStart} → ${sport.lastStart}` : "Aucun événement dans la fenêtre",
             sport.eventHash,
             sport.eventCount,
           ],
@@ -292,6 +323,7 @@ export async function GET(request: NextRequest) {
       scannedAt: now,
       source: "theoddsapi:all-sports-radar",
       radar: {
+        mode: radar.fullInventory ? "full-hourly" : "active-15min",
         windowMinutes: RADAR_WINDOW_MINUTES,
         sportsChecked: radar.sportsChecked,
         sportsWithEvents: radar.activeSports.length,
