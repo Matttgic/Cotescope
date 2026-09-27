@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { THE_ODDS_API_FR_BOOKMAKERS, THE_ODDS_API_REFERENCE_BOOKMAKER } from "@/lib/bookmakers";
 import type { Opportunity, Sport } from "@/lib/types";
 import { fairOddsFromProbability, noVigProbabilities, opportunityScore, passesHighOddsGuard } from "@/lib/value";
@@ -64,6 +65,20 @@ function freshnessScore(lastUpdate: string): { seconds: number; score: number } 
 
 function updateTimestamp(bookmaker: ApiBookmaker, market: ApiMarket): number {
   return Date.parse(bookmaker.last_update || market.last_update);
+}
+
+function opportunityId(event: ApiEvent, commenceAt: number, bookmakerKey: string, outcomeCount: number, selection: string) {
+  const selectionHash = createHash("sha1").update(selection).digest("hex").slice(0, 12);
+  return [
+    "v2",
+    event.id,
+    event.sport_key,
+    Math.floor(commenceAt / 1000),
+    bookmakerKey,
+    "h2h",
+    outcomeCount,
+    selectionHash,
+  ].join("|");
 }
 
 export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promise<OddsApiResult> {
@@ -144,7 +159,7 @@ export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promis
         const bookmakerLabel = THE_ODDS_API_FR_BOOKMAKERS[bookmaker.key as keyof typeof THE_ODDS_API_FR_BOOKMAKERS];
 
         opportunities.push({
-          id: `${event.id}:${bookmaker.key}:h2h:${outcome.name}`,
+          id: opportunityId(event, commenceAt, bookmaker.key, market.outcomes.length, outcome.name),
           sport: sportLabel(event.sport_key),
           competition: event.sport_title,
           event: `${event.home_team} – ${event.away_team}`,
