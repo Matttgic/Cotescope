@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Trigger secure CoteScope scan
+      - name: Trigger secure CoteScope scan and settlement
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
@@ -24,3 +24,11 @@ jobs:
             --retry-delay 5 \
             -H "Authorization: Bearer $CRON_SECRET" \
             https://cotescope.vercel.app/api/cron/scan
+
+          echo
+
+          curl --fail --silent --show-error \
+            --retry 2 \
+            --retry-delay 5 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://cotescope.vercel.app/api/cron/settle
