@@ -20,6 +20,11 @@ export type OddsApiResult = {
   quota: { remaining: number | null; used: number | null; lastCost: number | null };
 };
 
+const MIN_PREMATCH_LEAD_MS = 5 * 60 * 1000;
+const MAX_QUOTE_AGE_SECONDS = 120;
+const MAX_BOOKMAKER_SKEW_SECONDS = 60;
+const MAX_CREDIBLE_EV_PCT = 25;
+
 function numberHeader(headers: Headers, name: string): number | null {
   const raw = headers.get(name);
   if (raw == null) return null;
@@ -46,12 +51,19 @@ function sportLabel(key: string): Sport {
 }
 
 function freshnessScore(lastUpdate: string): { seconds: number; score: number } {
-  const seconds = Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000));
+  const updatedAt = Date.parse(lastUpdate);
+  if (!Number.isFinite(updatedAt)) return { seconds: Number.MAX_SAFE_INTEGER, score: 0 };
+  const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
   if (seconds <= 30) return { seconds, score: 1 };
   if (seconds <= 90) return { seconds, score: 0.9 };
-  if (seconds <= 180) return { seconds, score: 0.75 };
-  if (seconds <= 300) return { seconds, score: 0.55 };
-  return { seconds, score: 0.35 };
+  if (seconds <= 120) return { seconds, score: 0.8 };
+  if (seconds <= 180) return { seconds, score: 0.65 };
+  if (seconds <= 300) return { seconds, score: 0.45 };
+  return { seconds, score: 0.2 };
+}
+
+function updateTimestamp(bookmaker: ApiBookmaker, market: ApiMarket): number {
+  return Date.parse(bookmaker.last_update || market.last_update);
 }
 
 export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promise<OddsApiResult> {
@@ -82,11 +94,19 @@ export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promis
 
   const events = (await response.json()) as ApiEvent[];
   const opportunities: Opportunity[] = [];
+  const now = Date.now();
 
   for (const event of events) {
+    const commenceAt = Date.parse(event.commence_time);
+    if (!Number.isFinite(commenceAt) || commenceAt <= now + MIN_PREMATCH_LEAD_MS) continue;
+
     const reference = event.bookmakers.find((b) => b.key === THE_ODDS_API_REFERENCE_BOOKMAKER);
     const refMarket = reference?.markets.find((m) => m.key === "h2h");
     if (!reference || !refMarket || refMarket.outcomes.length < 2) continue;
+
+    const refFreshness = freshnessScore(reference.last_update || refMarket.last_update);
+    const refUpdatedAt = updateTimestamp(reference, refMarket);
+    if (refFreshness.seconds > MAX_QUOTE_AGE_SECONDS || !Number.isFinite(refUpdatedAt)) continue;
 
     const fairProbabilities = noVigProbabilities(refMarket.outcomes.map((o) => o.price));
     const fairBySelection = new Map(refMarket.outcomes.map((outcome, index) => [outcome.name, {
@@ -98,18 +118,24 @@ export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promis
       if (!(bookmaker.key in THE_ODDS_API_FR_BOOKMAKERS)) continue;
       const market = bookmaker.markets.find((m) => m.key === "h2h");
       if (!market) continue;
+
       const freshness = freshnessScore(bookmaker.last_update || market.last_update);
+      const bookmakerUpdatedAt = updateTimestamp(bookmaker, market);
+      if (freshness.seconds > MAX_QUOTE_AGE_SECONDS || !Number.isFinite(bookmakerUpdatedAt)) continue;
+
+      const updateSkewSeconds = Math.abs(bookmakerUpdatedAt - refUpdatedAt) / 1000;
+      if (updateSkewSeconds > MAX_BOOKMAKER_SKEW_SECONDS) continue;
 
       for (const outcome of market.outcomes) {
         const fair = fairBySelection.get(outcome.name);
         if (!fair || fair.probability <= 0 || outcome.price <= 1) continue;
         const evPct = (outcome.price * fair.probability - 1) * 100;
-        if (evPct <= 0) continue;
+        if (evPct <= 0 || evPct > MAX_CREDIBLE_EV_PCT) continue;
 
         const score = opportunityScore({
           evPct,
           sharpQuality: 0.95,
-          freshness: freshness.score,
+          freshness: Math.min(freshness.score, refFreshness.score),
           stability: 0.7,
           consensus: 0.75,
           liquidity: 0.7
@@ -131,7 +157,7 @@ export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promis
           fairOdds,
           evPct,
           opportunityScore: score,
-          freshnessSeconds: freshness.seconds,
+          freshnessSeconds: Math.max(freshness.seconds, refFreshness.seconds),
           confidence: score >= 85 ? "Forte" : score >= 70 ? "Moyenne" : "Faible",
           highOddsGuard: passesHighOddsGuard(outcome.price, score, evPct),
           isBoost: false
