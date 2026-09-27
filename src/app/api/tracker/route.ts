@@ -1,14 +1,11 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getDbPool } from "@/lib/db";
-import {
-  SERVER_DETECTION_OWNER_HASH,
-  SYSTEM_QUOTA_OPPORTUNITY_ID,
-  SYSTEM_SETTLEMENT_OPPORTUNITY_ID,
-} from "@/lib/serverTracker";
+import { SERVER_DETECTION_OWNER_HASH } from "@/lib/serverTracker";
 
 const VALID_STATUSES = new Set(["open", "win", "loss", "void"]);
 const KEY_PATTERN = /^[a-f0-9]{64}$/i;
+const SYSTEM_PREFIX = "__system_";
 
 type ApiBet = {
   id: string;
@@ -106,7 +103,7 @@ export async function GET(request: NextRequest) {
                 ) AS rn
            FROM public.bet_history
           WHERE owner_hash IN ($1, $2)
-            AND opportunity_id NOT IN ($3, $4)
+            AND LEFT(opportunity_id, LENGTH($3)) <> $3
        )
        SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
               selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status
@@ -114,7 +111,7 @@ export async function GET(request: NextRequest) {
         WHERE rn = 1
         ORDER BY created_at DESC
         LIMIT 1000`,
-      [hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID, SYSTEM_SETTLEMENT_OPPORTUNITY_ID],
+      [hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_PREFIX],
     );
 
     return NextResponse.json({ bets: result.rows.map(mapRow), cloud: true });
@@ -138,6 +135,7 @@ export async function POST(request: NextRequest) {
   try {
     await client.query("BEGIN");
     for (const bet of bets) {
+      if (bet.opportunityId.startsWith(SYSTEM_PREFIX)) continue;
       await client.query(
         `INSERT INTO public.bet_history
           (id, owner_hash, opportunity_id, created_at, updated_at, sport, competition, event, market,
@@ -186,8 +184,8 @@ export async function DELETE(request: NextRequest) {
     `DELETE FROM public.bet_history
       WHERE id = $1
         AND owner_hash IN ($2, $3)
-        AND opportunity_id NOT IN ($4, $5)`,
-    [id, hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID, SYSTEM_SETTLEMENT_OPPORTUNITY_ID],
+        AND LEFT(opportunity_id, LENGTH($4)) <> $4`,
+    [id, hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_PREFIX],
   );
   return NextResponse.json({ deleted: result.rowCount ?? 0, cloud: true });
 }
