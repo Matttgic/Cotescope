@@ -9,13 +9,17 @@ import type { Opportunity, Sport } from "@/lib/types";
 const SPORTS: Array<"Tous" | Sport> = ["Tous", "Football", "Tennis", "Basketball", "Rugby", "Handball", "Volleyball", "Hockey", "Baseball", "NFL", "MMA", "Boxe", "Cricket", "Darts", "Tennis de table", "Autre"];
 const NAV = ["Scanner", "Arbitrages", "Boosts", "Tracker", "Analytics"];
 const TRACKER_STORAGE_KEY = "cotescope.bet-history.v1";
+const TRACKER_SYNC_KEY = "cotescope.tracker-sync-key.v1";
+const TRACKER_KEY_PATTERN = /^[a-f0-9]{64}$/i;
 
 type BetStatus = "open" | "win" | "loss" | "void";
+type CloudState = "loading" | "connected" | "local";
 
 type TrackedBet = {
   id: string;
   opportunityId: string;
   createdAt: string;
+  updatedAt: string;
   sport: Sport;
   competition: string;
   event: string;
@@ -72,6 +76,31 @@ function formatTrackedDate(value: string) {
   }).format(date);
 }
 
+function generateSyncKey() {
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeLocalBet(value: TrackedBet): TrackedBet {
+  return {
+    ...value,
+    updatedAt: value.updatedAt || value.createdAt || new Date().toISOString(),
+  };
+}
+
+function mergeBetHistory(local: TrackedBet[], cloud: TrackedBet[]) {
+  const byOpportunity = new Map<string, TrackedBet>();
+  for (const bet of [...cloud, ...local]) {
+    const normalized = normalizeLocalBet(bet);
+    const current = byOpportunity.get(normalized.opportunityId);
+    const currentTime = current ? Date.parse(current.updatedAt || current.createdAt) : 0;
+    const nextTime = Date.parse(normalized.updatedAt || normalized.createdAt);
+    if (!current || nextTime >= currentTime) byOpportunity.set(normalized.opportunityId, normalized);
+  }
+  return Array.from(byOpportunity.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
 export default function Dashboard() {
   const [activeNav, setActiveNav] = useState("Scanner");
   const [sport, setSport] = useState<(typeof SPORTS)[number]>("Tous");
@@ -80,22 +109,68 @@ export default function Dashboard() {
   const [showGuarded, setShowGuarded] = useState(false);
   const [trackedBets, setTrackedBets] = useState<TrackedBet[]>([]);
   const [trackerLoaded, setTrackerLoaded] = useState(false);
+  const [syncKey, setSyncKey] = useState("");
+  const [syncDraft, setSyncDraft] = useState("");
+  const [cloudState, setCloudState] = useState<CloudState>("loading");
+  const [syncMessage, setSyncMessage] = useState("");
   const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
   const [isDemo, setIsDemo] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(TRACKER_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setTrackedBets(parsed as TrackedBet[]);
+    let cancelled = false;
+
+    async function initializeTracker() {
+      let localBets: TrackedBet[] = [];
+      try {
+        const raw = window.localStorage.getItem(TRACKER_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) localBets = parsed.map((bet) => normalizeLocalBet(bet as TrackedBet));
+        }
+      } catch {
+        localBets = [];
       }
-    } catch {
-      // A local storage failure must never block the scanner.
-    } finally {
-      setTrackerLoaded(true);
+
+      let key = window.localStorage.getItem(TRACKER_SYNC_KEY)?.trim() ?? "";
+      if (!TRACKER_KEY_PATTERN.test(key)) {
+        key = generateSyncKey();
+        window.localStorage.setItem(TRACKER_SYNC_KEY, key);
+      }
+      if (cancelled) return;
+      setSyncKey(key);
+      setSyncDraft(key);
+      setTrackedBets(localBets);
+
+      try {
+        const response = await fetch("/api/tracker", { headers: { "x-tracker-key": key } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const cloudBets = Array.isArray(payload.bets) ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)) : [];
+        const merged = mergeBetHistory(localBets, cloudBets);
+        if (cancelled) return;
+        setTrackedBets(merged);
+        setCloudState("connected");
+        setSyncMessage("Historique Neon synchronisé");
+        if (merged.length > 0) {
+          void fetch("/api/tracker", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-tracker-key": key },
+            body: JSON.stringify({ bets: merged }),
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setCloudState("local");
+          setSyncMessage("Mode local · Neon non relié à Vercel");
+        }
+      } finally {
+        if (!cancelled) setTrackerLoaded(true);
+      }
     }
+
+    void initializeTracker();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -151,35 +226,105 @@ export default function Dashboard() {
   const wins = DEMO_HISTORY.filter((x) => x.result === "win").length;
   const avgClv = DEMO_HISTORY.reduce((sum, x) => sum + x.clvPct, 0) / DEMO_HISTORY.length;
 
+  async function saveCloud(bets: TrackedBet[], key = syncKey) {
+    if (!TRACKER_KEY_PATTERN.test(key) || bets.length === 0) return;
+    try {
+      const response = await fetch("/api/tracker", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-tracker-key": key },
+        body: JSON.stringify({ bets }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setCloudState("connected");
+      setSyncMessage("Sauvegardé dans Neon");
+    } catch {
+      setCloudState("local");
+      setSyncMessage("Sauvegardé localement · cloud indisponible");
+    }
+  }
+
   function track(item: Opportunity) {
-    setTrackedBets((current) => {
-      if (current.some((bet) => bet.opportunityId === item.id)) return current;
-      const bet: TrackedBet = {
-        id: `${item.id}-${Date.now()}`,
-        opportunityId: item.id,
-        createdAt: new Date().toISOString(),
-        sport: item.sport,
-        competition: item.competition,
-        event: item.event,
-        market: item.market,
-        selection: item.selection,
-        bookmaker: item.bookmaker,
-        odds: item.bookmakerOdds,
-        stake: 10,
-        initialEvPct: item.evPct,
-        opportunityScore: item.opportunityScore,
-        status: "open",
-      };
-      return [bet, ...current];
-    });
+    if (trackedOpportunityIds.has(item.id)) return;
+    const now = new Date().toISOString();
+    const bet: TrackedBet = {
+      id: `${item.id}-${Date.now()}`,
+      opportunityId: item.id,
+      createdAt: now,
+      updatedAt: now,
+      sport: item.sport,
+      competition: item.competition,
+      event: item.event,
+      market: item.market,
+      selection: item.selection,
+      bookmaker: item.bookmaker,
+      odds: item.bookmakerOdds,
+      stake: 10,
+      initialEvPct: item.evPct,
+      opportunityScore: item.opportunityScore,
+      status: "open",
+    };
+    setTrackedBets((current) => [bet, ...current]);
+    void saveCloud([bet]);
   }
 
   function updateBet(id: string, patch: Partial<TrackedBet>) {
-    setTrackedBets((current) => current.map((bet) => bet.id === id ? { ...bet, ...patch } : bet));
+    const current = trackedBets.find((bet) => bet.id === id);
+    if (!current) return;
+    const updated: TrackedBet = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    setTrackedBets((bets) => bets.map((bet) => bet.id === id ? updated : bet));
+    void saveCloud([updated]);
   }
 
   function removeBet(id: string) {
     setTrackedBets((current) => current.filter((bet) => bet.id !== id));
+    if (!TRACKER_KEY_PATTERN.test(syncKey)) return;
+    void fetch(`/api/tracker?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "x-tracker-key": syncKey },
+    }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setCloudState("connected");
+      setSyncMessage("Pari supprimé du cloud");
+    }).catch(() => {
+      setCloudState("local");
+      setSyncMessage("Suppression locale · cloud indisponible");
+    });
+  }
+
+  async function applySyncKey() {
+    const key = syncDraft.trim().toLowerCase();
+    if (!TRACKER_KEY_PATTERN.test(key)) {
+      setSyncMessage("Clé invalide : 64 caractères hexadécimaux requis");
+      return;
+    }
+    window.localStorage.setItem(TRACKER_SYNC_KEY, key);
+    setSyncKey(key);
+    setCloudState("loading");
+    setSyncMessage("Synchronisation…");
+    try {
+      const response = await fetch("/api/tracker", { headers: { "x-tracker-key": key } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const cloudBets = Array.isArray(payload.bets) ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)) : [];
+      const merged = mergeBetHistory(trackedBets, cloudBets);
+      setTrackedBets(merged);
+      setCloudState("connected");
+      setSyncMessage("Clé importée · historique synchronisé");
+      await saveCloud(merged, key);
+    } catch {
+      setCloudState("local");
+      setSyncMessage("Clé enregistrée localement · cloud indisponible");
+    }
+  }
+
+  async function copySyncKey() {
+    if (!syncKey) return;
+    try {
+      await navigator.clipboard.writeText(syncKey);
+      setSyncMessage("Clé cloud copiée");
+    } catch {
+      setSyncMessage("Copie impossible sur ce navigateur");
+    }
   }
 
   return (
@@ -215,8 +360,16 @@ export default function Dashboard() {
       {activeNav === "Boosts" && <section className="stack-section"><div className="section-title"><div><span className="eyebrow">BOOST WATCH</span><h2>Boosts intéressants</h2></div><span className="data-note">comparés à la cote juste</span></div>{opportunities.filter((x) => x.isBoost).map((item) => <OpportunityCard key={item.id} item={item} onTrack={track} tracked={trackedOpportunityIds.has(item.id)} />)}</section>}
 
       {activeNav === "Tracker" && <section className="stack-section">
-        <div className="section-title"><div><span className="eyebrow">BET TRACKER</span><h2>Historique des paris pris</h2></div><span className="data-note">sauvegardé sur cet appareil</span></div>
+        <div className="section-title"><div><span className="eyebrow">BET TRACKER</span><h2>Historique des paris pris</h2></div><span className="data-note">{cloudState === "connected" ? "Neon cloud + secours local" : cloudState === "loading" ? "connexion cloud…" : "secours local"}</span></div>
         <div className="metrics-grid tracker-metrics"><Metric label="Paris enregistrés" value={String(trackedBets.length)} hint={`${openBets} ouverts`} /><Metric label="Mise cumulée" value={`${trackerStake.toFixed(2)} €`} hint="tous statuts" /><Metric label="Profit net" value={`${trackerProfit >= 0 ? "+" : ""}${trackerProfit.toFixed(2)} €`} hint="paris réglés" /><Metric label="ROI réalisé" value={`${trackerRoi >= 0 ? "+" : ""}${trackerRoi.toFixed(1)}%`} hint={settledBets > 0 ? `${winsTracked}/${settledBets} gagnés` : "aucun pari réglé"} /></div>
+        <article className="panel">
+          <div className="panel-heading"><div><span className="eyebrow">SYNC CLOUD</span><h2>{cloudState === "connected" ? "Neon connecté" : cloudState === "loading" ? "Connexion Neon" : "Mode local"}</h2></div><span className="data-note">{syncMessage}</span></div>
+          <div className="bet-fields" style={{ marginTop: 14 }}>
+            <label>Clé de synchronisation<input className="compact-input" type="password" value={syncDraft} onChange={(e) => setSyncDraft(e.target.value)} autoComplete="off" /></label>
+            <button className="track-button" type="button" onClick={copySyncKey}>Copier la clé</button>
+            <button className="track-button" type="button" onClick={applySyncKey}>Importer / synchroniser</button>
+          </div>
+        </article>
         {trackedBets.length === 0 ? <div className="panel empty-state">Ajoute une opportunité depuis Scanner ou Boosts. Elle apparaîtra ici avec sa date, sa cote et son EV au moment de la prise.</div> : <div className="tracker-history">{trackedBets.map((bet) => {
           const profit = betProfit(bet);
           return <article className="panel bet-history-card" key={bet.id}>
