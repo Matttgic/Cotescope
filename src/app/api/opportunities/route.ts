@@ -1,7 +1,8 @@
 import { fetchFrenchH2HOpportunities } from "@/lib/providers/theOddsApi";
 
 export async function GET(request: Request) {
-  const provider = process.env.ODDS_PROVIDER || "demo";
+  const hasOddsKey = Boolean(process.env.THE_ODDS_API_KEY?.trim());
+  const provider = process.env.ODDS_PROVIDER || (hasOddsKey ? "theoddsapi" : "demo");
   const { searchParams } = new URL(request.url);
   const sportKey = searchParams.get("sportKey") || "upcoming";
 
@@ -20,6 +21,18 @@ export async function GET(request: Request) {
     return Response.json({ error: `Unsupported ODDS_PROVIDER: ${provider}` }, { status: 500 });
   }
 
+  if (!hasOddsKey) {
+    return Response.json({
+      provider,
+      demo: true,
+      liveConfigured: false,
+      error: "THE_ODDS_API_KEY is missing",
+      generatedAt: new Date().toISOString(),
+      quota: null,
+      opportunities: []
+    }, { status: 503 });
+  }
+
   try {
     const result = await fetchFrenchH2HOpportunities(sportKey);
     return Response.json({
@@ -31,7 +44,12 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     return Response.json({
-      error: error instanceof Error ? error.message : "Unknown odds provider error"
+      provider,
+      demo: true,
+      liveConfigured: true,
+      error: error instanceof Error ? error.message : "Unknown odds provider error",
+      generatedAt: new Date().toISOString(),
+      opportunities: []
     }, { status: 502 });
   }
 }
