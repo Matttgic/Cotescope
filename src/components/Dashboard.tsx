@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DEMO_ARBITRAGES, DEMO_HISTORY, DEMO_OPPORTUNITIES } from "@/data/demo";
 import { ANJ_SPORTS_BOOKMAKERS } from "@/lib/bookmakers";
-import { arbitrageRoiPct, arbitrageStakes } from "@/lib/arbitrage";
 import type { Opportunity, Sport } from "@/lib/types";
 
 const SPORTS: Array<"Tous" | Sport> = ["Tous", "Football", "Tennis", "Basketball", "Rugby", "Handball", "Volleyball", "Hockey", "Baseball", "NFL", "MMA", "Boxe", "Cricket", "Darts", "Tennis de table", "Autre"];
@@ -37,7 +35,7 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
   return <article className="metric-card"><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>;
 }
 
-function OpportunityCard({ item, onTrack, tracked }: { item: Opportunity; onTrack: (item: Opportunity) => void; tracked?: boolean }) {
+function OpportunityCard({ item }: { item: Opportunity }) {
   return (
     <article className="opportunity-card">
       <div className="event-block"><span className="sport-pill">{item.sport}</span><strong>{item.event}</strong><small>{item.competition} · {item.startTime} · {item.market}</small></div>
@@ -45,7 +43,6 @@ function OpportunityCard({ item, onTrack, tracked }: { item: Opportunity; onTrac
       <div className="fair-block"><span>Cote juste</span><strong>{item.fairOdds.toFixed(2)}</strong><small>réf. {item.referenceOdds.toFixed(2)}</small></div>
       <div className="ev-block"><span>EV</span><strong>+{item.evPct.toFixed(1)}%</strong><small>{item.freshnessSeconds}s</small></div>
       <div className="score-block"><span>Score</span><strong>{item.opportunityScore}</strong><small>{item.confidence}</small></div>
-      <button className="track-button" disabled={tracked} onClick={() => onTrack(item)}>{tracked ? "Ajouté" : "Suivre"}</button>
     </article>
   );
 }
@@ -89,16 +86,42 @@ function normalizeLocalBet(value: TrackedBet): TrackedBet {
   };
 }
 
+function isDemoBet(bet: TrackedBet) {
+  return bet.opportunityId.startsWith("demo-");
+}
+
 function mergeBetHistory(local: TrackedBet[], cloud: TrackedBet[]) {
   const byOpportunity = new Map<string, TrackedBet>();
   for (const bet of [...cloud, ...local]) {
     const normalized = normalizeLocalBet(bet);
+    if (isDemoBet(normalized)) continue;
     const current = byOpportunity.get(normalized.opportunityId);
     const currentTime = current ? Date.parse(current.updatedAt || current.createdAt) : 0;
     const nextTime = Date.parse(normalized.updatedAt || normalized.createdAt);
     if (!current || nextTime >= currentTime) byOpportunity.set(normalized.opportunityId, normalized);
   }
   return Array.from(byOpportunity.values()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+function opportunityToTrackedBet(item: Opportunity, suffix: number): TrackedBet {
+  const now = new Date().toISOString();
+  return {
+    id: `auto-${item.id}-${suffix}`,
+    opportunityId: item.id,
+    createdAt: now,
+    updatedAt: now,
+    sport: item.sport,
+    competition: item.competition,
+    event: item.event,
+    market: item.market,
+    selection: item.selection,
+    bookmaker: item.bookmaker,
+    odds: item.bookmakerOdds,
+    stake: 10,
+    initialEvPct: item.evPct,
+    opportunityScore: item.opportunityScore,
+    status: "open",
+  };
 }
 
 export default function Dashboard() {
@@ -113,7 +136,7 @@ export default function Dashboard() {
   const [syncDraft, setSyncDraft] = useState("");
   const [cloudState, setCloudState] = useState<CloudState>("loading");
   const [syncMessage, setSyncMessage] = useState("");
-  const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isDemo, setIsDemo] = useState(true);
   const [loading, setLoading] = useState(true);
 
@@ -126,7 +149,11 @@ export default function Dashboard() {
         const raw = window.localStorage.getItem(TRACKER_STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) localBets = parsed.map((bet) => normalizeLocalBet(bet as TrackedBet));
+          if (Array.isArray(parsed)) {
+            localBets = parsed
+              .map((bet) => normalizeLocalBet(bet as TrackedBet))
+              .filter((bet) => !isDemoBet(bet));
+          }
         }
       } catch {
         localBets = [];
@@ -146,7 +173,9 @@ export default function Dashboard() {
         const response = await fetch("/api/tracker", { headers: { "x-tracker-key": key } });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        const cloudBets = Array.isArray(payload.bets) ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)) : [];
+        const cloudBets = Array.isArray(payload.bets)
+          ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)).filter((bet: TrackedBet) => !isDemoBet(bet))
+          : [];
         const merged = mergeBetHistory(localBets, cloudBets);
         if (cancelled) return;
         setTrackedBets(merged);
@@ -191,12 +220,13 @@ export default function Dashboard() {
       })
       .then((payload) => {
         if (cancelled) return;
-        setOpportunities(Array.isArray(payload.opportunities) ? payload.opportunities : []);
-        setIsDemo(Boolean(payload.demo));
+        const demo = Boolean(payload.demo);
+        setIsDemo(demo);
+        setOpportunities(!demo && Array.isArray(payload.opportunities) ? payload.opportunities : []);
       })
       .catch(() => {
         if (!cancelled) {
-          setOpportunities(DEMO_OPPORTUNITIES);
+          setOpportunities([]);
           setIsDemo(true);
         }
       })
@@ -212,19 +242,16 @@ export default function Dashboard() {
   }), [opportunities, sport, minEv, maxOdds, showGuarded]);
 
   const trackedOpportunityIds = useMemo(() => new Set(trackedBets.map((bet) => bet.opportunityId)), [trackedBets]);
+  const settledTracked = trackedBets.filter((bet) => bet.status === "win" || bet.status === "loss");
   const trackerStake = trackedBets.reduce((sum, bet) => sum + bet.stake, 0);
-  const trackerSettledStake = trackedBets.filter((bet) => bet.status !== "open").reduce((sum, bet) => sum + bet.stake, 0);
+  const trackerSettledStake = settledTracked.reduce((sum, bet) => sum + bet.stake, 0);
   const trackerProfit = trackedBets.reduce((sum, bet) => sum + betProfit(bet), 0);
   const trackerRoi = trackerSettledStake > 0 ? (trackerProfit / trackerSettledStake) * 100 : 0;
   const openBets = trackedBets.filter((bet) => bet.status === "open").length;
   const winsTracked = trackedBets.filter((bet) => bet.status === "win").length;
-  const settledBets = trackedBets.filter((bet) => bet.status !== "open" && bet.status !== "void").length;
-
-  const historyProfit = DEMO_HISTORY.reduce((sum, x) => sum + x.profit, 0);
-  const historyStake = DEMO_HISTORY.reduce((sum, x) => sum + x.stake, 0);
-  const roi = historyStake > 0 ? (historyProfit / historyStake) * 100 : 0;
-  const wins = DEMO_HISTORY.filter((x) => x.result === "win").length;
-  const avgClv = DEMO_HISTORY.reduce((sum, x) => sum + x.clvPct, 0) / DEMO_HISTORY.length;
+  const settledBets = settledTracked.length;
+  const winRate = settledBets > 0 ? (winsTracked / settledBets) * 100 : 0;
+  const liveBoosts = opportunities.filter((item) => item.isBoost);
 
   async function saveCloud(bets: TrackedBet[], key = syncKey) {
     if (!TRACKER_KEY_PATTERN.test(key) || bets.length === 0) return;
@@ -241,30 +268,6 @@ export default function Dashboard() {
       setCloudState("local");
       setSyncMessage("Sauvegardé localement · cloud indisponible");
     }
-  }
-
-  function track(item: Opportunity) {
-    if (trackedOpportunityIds.has(item.id)) return;
-    const now = new Date().toISOString();
-    const bet: TrackedBet = {
-      id: `${item.id}-${Date.now()}`,
-      opportunityId: item.id,
-      createdAt: now,
-      updatedAt: now,
-      sport: item.sport,
-      competition: item.competition,
-      event: item.event,
-      market: item.market,
-      selection: item.selection,
-      bookmaker: item.bookmaker,
-      odds: item.bookmakerOdds,
-      stake: 10,
-      initialEvPct: item.evPct,
-      opportunityScore: item.opportunityScore,
-      status: "open",
-    };
-    setTrackedBets((current) => [bet, ...current]);
-    void saveCloud([bet]);
   }
 
   function updateBet(id: string, patch: Partial<TrackedBet>) {
@@ -305,7 +308,9 @@ export default function Dashboard() {
       const response = await fetch("/api/tracker", { headers: { "x-tracker-key": key } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
-      const cloudBets = Array.isArray(payload.bets) ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)) : [];
+      const cloudBets = Array.isArray(payload.bets)
+        ? payload.bets.map((bet: TrackedBet) => normalizeLocalBet(bet)).filter((bet: TrackedBet) => !isDemoBet(bet))
+        : [];
       const merged = mergeBetHistory(trackedBets, cloudBets);
       setTrackedBets(merged);
       setCloudState("connected");
@@ -327,40 +332,46 @@ export default function Dashboard() {
     }
   }
 
+  useEffect(() => {
+    if (!trackerLoaded || loading || isDemo || filtered.length === 0) return;
+    const fresh = filtered.filter((item) => !trackedOpportunityIds.has(item.id));
+    if (fresh.length === 0) return;
+
+    const base = Date.now();
+    const bets = fresh.map((item, index) => opportunityToTrackedBet(item, base + index));
+    setTrackedBets((current) => mergeBetHistory(current, bets));
+    void saveCloud(bets);
+  }, [filtered, trackedOpportunityIds, trackerLoaded, loading, isDemo, syncKey]);
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div><div className="brand-row"><div className="logo-mark">C</div><div><strong className="brand">CoteScope FR</strong><span className="badge">FRANCE ONLY</span></div></div><p>Scanner privé de value, arbitrages et boosts · Bookmakers ANJ uniquement</p></div>
-        <div className="live-state"><i /> {loading ? "CHARGEMENT" : isDemo ? "MODE DÉMO" : "COTES LIVE"}</div>
+        <div className="live-state"><i /> {loading ? "CHARGEMENT" : isDemo ? "SOURCE LIVE NON CONFIGURÉE" : "COTES LIVE"}</div>
       </header>
 
       <nav className="nav-tabs" aria-label="Sections">{NAV.map((item) => <button key={item} className={activeNav === item ? "active" : ""} onClick={() => setActiveNav(item)}>{item}{item === "Tracker" && trackedBets.length > 0 ? ` (${trackedBets.length})` : ""}</button>)}</nav>
 
       {activeNav === "Scanner" && <>
-        <section className="metrics-grid"><Metric label="Opportunités" value={String(filtered.length)} hint="après filtres" /><Metric label="EV max" value={`${Math.max(...filtered.map((x) => x.evPct), 0).toFixed(1)}%`} hint={isDemo ? "démo" : "live"} /><Metric label="Score max" value={`${Math.max(...filtered.map((x) => x.opportunityScore), 0)}/100`} hint="qualité interne" /><Metric label="Bookmakers" value={String(ANJ_SPORTS_BOOKMAKERS.length)} hint="domaines ANJ configurés" /></section>
-        <section className="panel filters"><div className="panel-heading"><div><span className="eyebrow">FILTRES</span><h2>Scanner de value</h2></div><span className="data-note">{isDemo ? "Données fictives de démonstration" : "Données fournisseur · référence Pinnacle no-vig"}</span></div><div className="filter-grid">
+        <section className="metrics-grid"><Metric label="Opportunités" value={String(filtered.length)} hint="live après filtres" /><Metric label="EV max" value={`${Math.max(...filtered.map((x) => x.evPct), 0).toFixed(1)}%`} hint={isDemo ? "aucune donnée fictive" : "live"} /><Metric label="Score max" value={`${Math.max(...filtered.map((x) => x.opportunityScore), 0)}/100`} hint="qualité interne" /><Metric label="Bookmakers" value={String(ANJ_SPORTS_BOOKMAKERS.length)} hint="domaines ANJ configurés" /></section>
+        <section className="panel filters"><div className="panel-heading"><div><span className="eyebrow">FILTRES</span><h2>Scanner de value</h2></div><span className="data-note">{isDemo ? "Aucune donnée live affichée tant que le fournisseur de cotes n’est pas activé" : "Données fournisseur · référence Pinnacle no-vig · enregistrement Tracker automatique"}</span></div><div className="filter-grid">
           <label>Sport<select value={sport} onChange={(e) => setSport(e.target.value as (typeof SPORTS)[number])}>{SPORTS.map((s) => <option key={s}>{s}</option>)}</select></label>
           <label>EV minimum<input type="range" min="0" max="10" step="0.5" value={minEv} onChange={(e) => setMinEv(Number(e.target.value))} /><b>{minEv.toFixed(1)}%</b></label>
           <label>Cote max standard<input type="range" min="1.5" max="8" step="0.25" value={maxOdds} onChange={(e) => setMaxOdds(Number(e.target.value))} /><b>{maxOdds.toFixed(2)}</b></label>
           <label className="switch-row"><input type="checkbox" checked={showGuarded} onChange={(e) => setShowGuarded(e.target.checked)} /><span>Afficher les opportunités bloquées par le garde-fou</span></label>
         </div></section>
-        <section className="opportunity-list">{filtered.map((item) => <OpportunityCard key={item.id} item={item} onTrack={track} tracked={trackedOpportunityIds.has(item.id)} />)}{filtered.length === 0 && <div className="empty-state">Aucune opportunité ne passe les filtres actuels.</div>}</section>
+        <section className="opportunity-list">{filtered.map((item) => <OpportunityCard key={item.id} item={item} />)}{filtered.length === 0 && <div className="empty-state">{isDemo ? "Aucune sélection fictive : branche le fournisseur de cotes live pour alimenter le Scanner." : "Aucune opportunité ne passe les filtres actuels."}</div>}</section>
       </>}
 
       {activeNav === "Arbitrages" && <section className="stack-section">
-        <div className="section-title"><div><span className="eyebrow">SUREBETS</span><h2>Arbitrages détectés</h2></div><span className="data-note">Répartition sur 100 €</span></div>
-        {DEMO_ARBITRAGES.map((arb) => {
-          const odds = arb.outcomes.map((x) => x.odds);
-          const arbRoi = arbitrageRoiPct(odds);
-          const stakes = arbitrageStakes(odds, 100);
-          return <article className="panel arb-card" key={arb.id}><div><span className="sport-pill">{arb.sport}</span><h3>{arb.event}</h3><small>{arb.market} · fraîcheur {arb.freshnessSeconds}s</small></div><div className="arb-outcomes">{arb.outcomes.map((outcome, index) => <div key={outcome.selection}><span>{outcome.selection}</span><strong>{outcome.odds.toFixed(2)}</strong><small>{outcome.bookmaker} · mise {stakes[index].toFixed(2)} €</small></div>)}</div><div className="arb-roi"><span>Rendement théorique si les cotes restent disponibles</span><strong>+{arbRoi.toFixed(2)}%</strong></div></article>;
-        })}
+        <div className="section-title"><div><span className="eyebrow">SUREBETS</span><h2>Arbitrages détectés</h2></div><span className="data-note">live uniquement</span></div>
+        <div className="panel empty-state">Le moteur d’arbitrage live n’est pas encore branché. Aucune donnée fictive n’est affichée.</div>
       </section>}
 
-      {activeNav === "Boosts" && <section className="stack-section"><div className="section-title"><div><span className="eyebrow">BOOST WATCH</span><h2>Boosts intéressants</h2></div><span className="data-note">comparés à la cote juste</span></div>{opportunities.filter((x) => x.isBoost).map((item) => <OpportunityCard key={item.id} item={item} onTrack={track} tracked={trackedOpportunityIds.has(item.id)} />)}</section>}
+      {activeNav === "Boosts" && <section className="stack-section"><div className="section-title"><div><span className="eyebrow">BOOST WATCH</span><h2>Boosts intéressants</h2></div><span className="data-note">live uniquement</span></div>{liveBoosts.map((item) => <OpportunityCard key={item.id} item={item} />)}{liveBoosts.length === 0 && <div className="panel empty-state">Aucun boost live détecté.</div>}</section>}
 
       {activeNav === "Tracker" && <section className="stack-section">
-        <div className="section-title"><div><span className="eyebrow">BET TRACKER</span><h2>Historique des paris pris</h2></div><span className="data-note">{cloudState === "connected" ? "Neon cloud + secours local" : cloudState === "loading" ? "connexion cloud…" : "secours local"}</span></div>
+        <div className="section-title"><div><span className="eyebrow">BET TRACKER</span><h2>Historique automatique CoteScope</h2></div><span className="data-note">{cloudState === "connected" ? "Neon cloud + secours local" : cloudState === "loading" ? "connexion cloud…" : "secours local"}</span></div>
         <div className="metrics-grid tracker-metrics"><Metric label="Paris enregistrés" value={String(trackedBets.length)} hint={`${openBets} ouverts`} /><Metric label="Mise cumulée" value={`${trackerStake.toFixed(2)} €`} hint="tous statuts" /><Metric label="Profit net" value={`${trackerProfit >= 0 ? "+" : ""}${trackerProfit.toFixed(2)} €`} hint="paris réglés" /><Metric label="ROI réalisé" value={`${trackerRoi >= 0 ? "+" : ""}${trackerRoi.toFixed(1)}%`} hint={settledBets > 0 ? `${winsTracked}/${settledBets} gagnés` : "aucun pari réglé"} /></div>
         <article className="panel">
           <div className="panel-heading"><div><span className="eyebrow">SYNC CLOUD</span><h2>{cloudState === "connected" ? "Neon connecté" : cloudState === "loading" ? "Connexion Neon" : "Mode local"}</h2></div><span className="data-note">{syncMessage}</span></div>
@@ -370,7 +381,7 @@ export default function Dashboard() {
             <button className="track-button" type="button" onClick={applySyncKey}>Importer / synchroniser</button>
           </div>
         </article>
-        {trackedBets.length === 0 ? <div className="panel empty-state">Ajoute une opportunité depuis Scanner ou Boosts. Elle apparaîtra ici avec sa date, sa cote et son EV au moment de la prise.</div> : <div className="tracker-history">{trackedBets.map((bet) => {
+        {trackedBets.length === 0 ? <div className="panel empty-state">Les opportunités live affichées dans Scanner seront enregistrées ici automatiquement. Aucun clic n’est nécessaire.</div> : <div className="tracker-history">{trackedBets.map((bet) => {
           const profit = betProfit(bet);
           return <article className="panel bet-history-card" key={bet.id}>
             <div className="bet-main"><div><span className="sport-pill">{bet.sport}</span><strong>{bet.event}</strong><small>{formatTrackedDate(bet.createdAt)} · {bet.competition}</small></div><div><span>Sélection</span><strong>{bet.selection}</strong><small>{bet.market}</small></div></div>
@@ -381,14 +392,14 @@ export default function Dashboard() {
               <label>Statut<select className="compact-select" value={bet.status} onChange={(e) => updateBet(bet.id, { status: e.target.value as BetStatus })}><option value="open">Ouvert</option><option value="win">Gagné</option><option value="loss">Perdu</option><option value="void">Remboursé</option></select></label>
               <div className="bet-result"><span>Résultat</span><strong className={profit > 0 ? "positive" : profit < 0 ? "negative" : ""}>{profit > 0 ? "+" : ""}{profit.toFixed(2)} €</strong><small>{statusLabel(bet.status)}</small></div>
             </div>
-            <div className="bet-meta"><span>EV prise <strong>+{bet.initialEvPct.toFixed(1)}%</strong></span><span>Score <strong>{bet.opportunityScore}/100</strong></span><button className="delete-bet" onClick={() => removeBet(bet.id)}>Supprimer</button></div>
+            <div className="bet-meta"><span>EV détection <strong>+{bet.initialEvPct.toFixed(1)}%</strong></span><span>Score <strong>{bet.opportunityScore}/100</strong></span><button className="delete-bet" onClick={() => removeBet(bet.id)}>Supprimer</button></div>
           </article>;
         })}</div>}
       </section>}
 
       {activeNav === "Analytics" && <section className="stack-section">
-        <div className="metrics-grid"><Metric label="Profit démo" value={`${historyProfit >= 0 ? "+" : ""}${historyProfit.toFixed(2)} €`} hint="5 paris réglés" /><Metric label="ROI" value={`${roi.toFixed(1)}%`} hint={`${wins}/${DEMO_HISTORY.length} gagnés`} /><Metric label="CLV moyen" value={`${avgClv >= 0 ? "+" : ""}${avgClv.toFixed(1)}%`} hint="vs closing line" /><Metric label="Mise totale" value={`${historyStake.toFixed(0)} €`} hint="10 € / pari" /></div>
-        <article className="panel"><div className="panel-heading"><div><span className="eyebrow">HISTORIQUE</span><h2>Performance lisible</h2></div><span className="data-note">échantillon démo</span></div><div className="history-table">{DEMO_HISTORY.map((row) => <div className="history-row" key={row.id}><span>{row.sport}</span><span>{row.bookmaker}</span><span>@ {row.odds.toFixed(2)}</span><strong className={row.profit >= 0 ? "positive" : "negative"}>{row.profit >= 0 ? "+" : ""}{row.profit.toFixed(2)} €</strong><span>CLV {row.clvPct >= 0 ? "+" : ""}{row.clvPct.toFixed(1)}%</span></div>)}</div></article>
+        <div className="metrics-grid"><Metric label="Profit net" value={`${trackerProfit >= 0 ? "+" : ""}${trackerProfit.toFixed(2)} €`} hint="historique réel Tracker" /><Metric label="ROI réalisé" value={`${trackerRoi >= 0 ? "+" : ""}${trackerRoi.toFixed(1)}%`} hint={`${settledBets} paris réglés`} /><Metric label="Réussite" value={`${winRate.toFixed(1)}%`} hint={settledBets > 0 ? `${winsTracked}/${settledBets} gagnés` : "aucun pari réglé"} /><Metric label="Mise réglée" value={`${trackerSettledStake.toFixed(2)} €`} hint="gagnés + perdus" /></div>
+        <article className="panel"><div className="panel-heading"><div><span className="eyebrow">HISTORIQUE</span><h2>Performance réelle du Tracker</h2></div><span className="data-note">aucune donnée fictive</span></div>{trackedBets.length === 0 ? <div className="empty-state">Aucune détection enregistrée pour le moment.</div> : <div className="history-table">{trackedBets.map((row) => { const profit = betProfit(row); return <div className="history-row" key={row.id}><span>{row.sport}</span><span>{row.bookmaker}</span><span>@ {row.odds.toFixed(2)}</span><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{profit.toFixed(2)} €</strong><span>{statusLabel(row.status)}</span></div>; })}</div>}</article>
       </section>}
 
       <footer><strong>18+</strong> Les probabilités, écarts de cotes et scores sont des outils d’analyse, pas des garanties de gain. Vérifier la cote avant toute prise de pari.</footer>
