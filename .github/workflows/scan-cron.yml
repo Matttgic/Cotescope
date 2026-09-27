@@ -21,6 +21,7 @@ jobs:
             exit 0
           fi
 
+          # Test and production use the same secured endpoints.
           curl --fail --silent --show-error \
             --retry 2 \
             --retry-delay 5 \
