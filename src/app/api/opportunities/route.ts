@@ -1,55 +1,129 @@
-import { fetchFrenchH2HOpportunities } from "@/lib/providers/theOddsApi";
+import { getDbPool } from "@/lib/db";
+import type { Opportunity, Sport } from "@/lib/types";
+import {
+  SERVER_DETECTION_OWNER_HASH,
+  SYSTEM_QUOTA_OPPORTUNITY_ID,
+} from "@/lib/serverTracker";
 
-export async function GET(request: Request) {
-  const hasOddsKey = Boolean(process.env.THE_ODDS_API_KEY?.trim());
-  const provider = process.env.ODDS_PROVIDER || (hasOddsKey ? "theoddsapi" : "demo");
-  const { searchParams } = new URL(request.url);
-  const sportKey = searchParams.get("sportKey") || "upcoming";
+function confidence(score: number): Opportunity["confidence"] {
+  if (score >= 85) return "Forte";
+  if (score >= 70) return "Moyenne";
+  return "Faible";
+}
 
-  if (provider === "demo") {
+function sportValue(value: unknown): Sport {
+  return String(value || "Autre") as Sport;
+}
+
+function parseOpportunity(row: Record<string, unknown>): Opportunity | null {
+  const id = String(row.opportunity_id ?? "");
+  const parts = id.split("|");
+  if (parts.length !== 8 || parts[0] !== "v2") return null;
+  const startUnix = Number(parts[3]);
+  if (!Number.isFinite(startUnix) || startUnix * 1000 <= Date.now()) return null;
+
+  const bookmakerOdds = Number(row.odds);
+  const evPct = Number(row.initial_ev_pct);
+  const opportunityScore = Number(row.opportunity_score);
+  if (!Number.isFinite(bookmakerOdds) || bookmakerOdds <= 1) return null;
+  if (!Number.isFinite(evPct) || evPct <= 0) return null;
+  const fairOdds = bookmakerOdds / (1 + evPct / 100);
+  const updatedAt = Date.parse(String(row.updated_at));
+  const freshnessSeconds = Number.isFinite(updatedAt)
+    ? Math.max(0, Math.round((Date.now() - updatedAt) / 1000))
+    : 0;
+
+  return {
+    id,
+    sport: sportValue(row.sport),
+    competition: String(row.competition ?? ""),
+    event: String(row.event ?? ""),
+    startTime: new Date(startUnix * 1000).toISOString(),
+    market: String(row.market ?? "Résultat / H2H"),
+    selection: String(row.selection ?? ""),
+    bookmaker: String(row.bookmaker ?? ""),
+    bookmakerOdds,
+    referenceOdds: 0,
+    fairOdds,
+    evPct,
+    opportunityScore,
+    freshnessSeconds,
+    confidence: confidence(opportunityScore),
+    highOddsGuard: true,
+    isBoost: false,
+  };
+}
+
+export async function GET() {
+  const pool = getDbPool();
+  if (!pool) {
     return Response.json({
-      provider,
-      demo: true,
-      liveConfigured: false,
+      provider: "theoddsapi",
+      source: "radar-cache",
+      demo: false,
+      liveConfigured: Boolean(process.env.THE_ODDS_API_KEY?.trim()),
       generatedAt: new Date().toISOString(),
       quota: null,
-      opportunities: []
-    });
-  }
-
-  if (provider !== "theoddsapi") {
-    return Response.json({ error: `Unsupported ODDS_PROVIDER: ${provider}` }, { status: 500 });
-  }
-
-  if (!hasOddsKey) {
-    return Response.json({
-      provider,
-      demo: true,
-      liveConfigured: false,
-      error: "THE_ODDS_API_KEY is missing",
-      generatedAt: new Date().toISOString(),
-      quota: null,
-      opportunities: []
+      opportunities: [],
+      error: "database_not_configured",
     }, { status: 503 });
   }
 
   try {
-    const result = await fetchFrenchH2HOpportunities(sportKey);
+    const [opportunityRows, quotaRows] = await Promise.all([
+      pool.query(
+        `SELECT opportunity_id, updated_at, sport, competition, event, market, selection,
+                bookmaker, odds, initial_ev_pct, opportunity_score
+           FROM public.bet_history
+          WHERE owner_hash = $1
+            AND status = 'open'
+            AND LEFT(opportunity_id, 3) = 'v2|'
+          ORDER BY updated_at DESC
+          LIMIT 1000`,
+        [SERVER_DETECTION_OWNER_HASH],
+      ),
+      pool.query(
+        `SELECT initial_ev_pct AS used, stake AS remaining, updated_at
+           FROM public.bet_history
+          WHERE owner_hash = $1 AND opportunity_id = $2
+          LIMIT 1`,
+        [SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID],
+      ),
+    ]);
+
+    const opportunities = (opportunityRows.rows as Array<Record<string, unknown>>)
+      .map(parseOpportunity)
+      .filter((item): item is Opportunity => item !== null)
+      .sort((a, b) => b.opportunityScore - a.opportunityScore || b.evPct - a.evPct);
+
+    const quotaRow = quotaRows.rows[0] as Record<string, unknown> | undefined;
+    const quota = quotaRow ? {
+      used: Number(quotaRow.used) || 0,
+      remaining: Number(quotaRow.remaining) || 0,
+      lastCost: null,
+      updatedAt: new Date(String(quotaRow.updated_at)).toISOString(),
+    } : null;
+
     return Response.json({
-      provider,
+      provider: "theoddsapi",
+      source: "radar-cache",
       demo: false,
-      liveConfigured: true,
+      liveConfigured: Boolean(process.env.THE_ODDS_API_KEY?.trim()),
       generatedAt: new Date().toISOString(),
-      ...result
+      quota,
+      opportunities,
     });
   } catch (error) {
+    console.error("opportunity_snapshot_read_failed", error);
     return Response.json({
-      provider,
-      demo: true,
-      liveConfigured: true,
-      error: error instanceof Error ? error.message : "Unknown odds provider error",
+      provider: "theoddsapi",
+      source: "radar-cache",
+      demo: false,
+      liveConfigured: Boolean(process.env.THE_ODDS_API_KEY?.trim()),
       generatedAt: new Date().toISOString(),
-      opportunities: []
-    }, { status: 502 });
+      quota: null,
+      opportunities: [],
+      error: "opportunity_snapshot_read_failed",
+    }, { status: 500 });
   }
 }
