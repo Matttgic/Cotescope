@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDbPool } from "@/lib/db";
 import { fetchRecentScores, type CompletedScoreEvent } from "@/lib/providers/theOddsApiScores";
 import {
+  MONTHLY_AUTOMATION_HARD_CAP,
+  automationBudgetRatio,
+  canSpendAutomationCredits,
+} from "@/lib/quotaPolicy";
+import {
   SERVER_DETECTION_OWNER_HASH,
   SYSTEM_QUOTA_OPPORTUNITY_ID,
   SYSTEM_SETTLEMENT_OPPORTUNITY_ID,
@@ -74,12 +79,10 @@ function settleH2H(detection: OpenDetection, result: CompletedScoreEvent): BetSt
 }
 
 function settlementIntervalMs(quota: QuotaState | null) {
-  if (!quota) return 2 * HOUR_MS;
-  const total = quota.used + quota.remaining;
-  const ratio = total > 0 ? quota.used / total : 0;
-  if (ratio >= 0.95) return null;
-  if (ratio >= 0.85) return 6 * HOUR_MS;
-  if (ratio >= 0.70) return 3 * HOUR_MS;
+  if (quota && !canSpendAutomationCredits(quota.used, 2)) return null;
+  const ratio = automationBudgetRatio(quota?.used);
+  if (ratio >= 0.9) return 6 * HOUR_MS;
+  if (ratio >= 0.75) return 3 * HOUR_MS;
   return 2 * HOUR_MS;
 }
 
@@ -169,7 +172,11 @@ export async function GET(request: NextRequest) {
   const quota = await readQuotaState();
   const interval = settlementIntervalMs(quota);
   if (interval == null) {
-    return NextResponse.json({ ok: true, skipped: "quota_guard_95pct" });
+    return NextResponse.json({
+      ok: true,
+      skipped: "automation_budget_cap",
+      hardCap: MONTHLY_AUTOMATION_HARD_CAP,
+    });
   }
 
   const lastSettlementAt = await readLastSettlementAt();
@@ -215,6 +222,7 @@ export async function GET(request: NextRequest) {
     bySport.set(detection.sportKey, group);
   }
 
+  let currentUsed = quota?.used ?? 0;
   let checked = 0;
   let settled = 0;
   let wins = 0;
@@ -224,9 +232,12 @@ export async function GET(request: NextRequest) {
   const errors: string[] = [];
 
   for (const [sportKey, detections] of bySport) {
+    if (!canSpendAutomationCredits(currentUsed, 2)) break;
     try {
       const scores = await fetchRecentScores(sportKey);
       await updateQuotaState(scores.quota);
+      if (scores.quota.used != null) currentUsed = scores.quota.used;
+      else currentUsed += scores.quota.lastCost ?? 2;
       if (scores.unsupported) {
         unsupportedSports.push(sportKey);
         continue;
@@ -268,6 +279,8 @@ export async function GET(request: NextRequest) {
     wins,
     losses,
     voids,
+    quotaUsed: currentUsed,
+    hardCap: MONTHLY_AUTOMATION_HARD_CAP,
     unsupportedSports,
     errors,
   });
