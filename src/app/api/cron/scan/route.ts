@@ -20,7 +20,7 @@ const MIN_EV_PCT = 2;
 const MAX_STANDARD_ODDS = 4;
 const RADAR_WINDOW_MINUTES = 90;
 const FULL_RADAR_INTERVAL_MS = 60 * 60 * 1000;
-const ACTIVE_RADAR_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const SPORT_CACHE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const PAID_SCAN_COOLDOWN_MS = 60 * 60 * 1000;
 const FINAL_REFRESH_LEAD_MS = 20 * 60 * 1000;
 const FINAL_REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
@@ -169,13 +169,13 @@ export async function GET(request: NextRequest) {
     const [previousQuota, markers] = await Promise.all([readQuotaState(), readMarkerMaps()]);
     const nowMs = Date.now();
     const fullRadarDue = !markers.fullRadarAt || nowMs - markers.fullRadarAt >= FULL_RADAR_INTERVAL_MS;
-    const cachedActiveSportKeys = fullRadarDue
+    const cachedSportKeys = fullRadarDue
       ? undefined
       : [...markers.radar.entries()]
-          .filter(([, marker]) => marker.eventCount > 0 && nowMs - marker.updatedAt <= ACTIVE_RADAR_MAX_AGE_MS)
+          .filter(([, marker]) => nowMs - marker.updatedAt <= SPORT_CACHE_MAX_AGE_MS)
           .map(([sportKey]) => sportKey);
 
-    const radar = await fetchRadarWindow(RADAR_WINDOW_MINUTES, cachedActiveSportKeys);
+    const radar = await fetchRadarWindow(RADAR_WINDOW_MINUTES, cachedSportKeys);
     let currentUsed = radar.quota.used ?? previousQuota?.used ?? 0;
     let currentRemaining = radar.quota.remaining ?? previousQuota?.remaining ?? 0;
     const paidScans: Array<{ sportKey: string; reason: string; cost: number | null }> = [];
@@ -323,7 +323,7 @@ export async function GET(request: NextRequest) {
       scannedAt: now,
       source: "theoddsapi:all-sports-radar",
       radar: {
-        mode: radar.fullInventory ? "full-hourly" : "active-15min",
+        mode: radar.fullInventory ? "full-hourly" : "all-sports-15min",
         windowMinutes: RADAR_WINDOW_MINUTES,
         sportsChecked: radar.sportsChecked,
         sportsWithEvents: radar.activeSports.length,
