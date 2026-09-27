@@ -56,6 +56,10 @@ function providerKey() {
   return apiKey;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchActiveSports() {
   const url = new URL(`${providerBaseUrl()}/v4/sports/`);
   url.searchParams.set("apiKey", providerKey());
@@ -87,15 +91,22 @@ async function fetchSportEvents(sportKey: string, from: string, to: string): Pro
   url.searchParams.set("commenceTimeFrom", from);
   url.searchParams.set("commenceTimeTo", to);
 
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(url, { cache: "no-store" });
+    if (response.ok) {
+      const raw = (await response.json()) as RadarEvent[];
+      return Array.isArray(raw) ? raw : [];
+    }
     if (response.status === 404 || response.status === 422) return [];
+    if (response.status === 429 && attempt < 2) {
+      await sleep(1_500 * (attempt + 1));
+      continue;
+    }
     const body = await response.text();
     throw new Error(`Events radar error ${response.status}: ${body.slice(0, 220)}`);
   }
 
-  const raw = (await response.json()) as RadarEvent[];
-  return Array.isArray(raw) ? raw : [];
+  return [];
 }
 
 function eventHash(events: RadarEvent[]) {
@@ -114,7 +125,9 @@ export async function fetchRadarWindow(windowMinutes = 90): Promise<RadarWindowR
   const activeSports: RadarSportWindow[] = [];
   const errors: string[] = [];
 
-  const concurrency = 8;
+  // The provider currently allows 30 req/s on paid plans, but recommends staying well below it.
+  // Four requests every ~500 ms keeps the free radar around 8 req/s and retries transient 429s.
+  const concurrency = 4;
   for (let index = 0; index < sports.length; index += concurrency) {
     const batch = sports.slice(index, index + concurrency);
     const results = await Promise.allSettled(
@@ -140,6 +153,8 @@ export async function fetchRadarWindow(windowMinutes = 90): Promise<RadarWindowR
         lastStart: ordered[ordered.length - 1].commence_time,
       });
     }
+
+    if (index + concurrency < sports.length) await sleep(500);
   }
 
   activeSports.sort((a, b) => Date.parse(a.firstStart) - Date.parse(b.firstStart));
