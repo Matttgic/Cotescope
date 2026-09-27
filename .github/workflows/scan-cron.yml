@@ -1,0 +1,26 @@
+name: CoteScope Server Scan
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger secure CoteScope scan
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET is not configured; skipping scan."
+            exit 0
+          fi
+
+          curl --fail --silent --show-error \
+            --retry 2 \
+            --retry-delay 5 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://cotescope.vercel.app/api/cron/scan
