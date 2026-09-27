@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const SCAN_INTERVAL_MS = 5 * 60 * 1000;
+const SCAN_INTERVAL_MS = 30 * 60 * 1000;
 
 export default function LiveScanRefresh() {
   useEffect(() => {
