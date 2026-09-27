@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getDbPool } from "@/lib/db";
+import { SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID } from "@/lib/serverTracker";
 
 const VALID_STATUSES = new Set(["open", "win", "loss", "void"]);
 const KEY_PATTERN = /^[a-f0-9]{64}$/i;
@@ -90,17 +91,33 @@ export async function GET(request: NextRequest) {
   const pool = getDbPool();
   if (!pool) return NextResponse.json({ error: "database_not_configured" }, { status: 503 });
 
-  const result = await pool.query(
-    `SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
-            selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status
-       FROM public.bet_history
-      WHERE owner_hash = $1
-      ORDER BY created_at DESC
-      LIMIT 1000`,
-    [hash],
-  );
+  try {
+    const result = await pool.query(
+      `WITH ranked AS (
+         SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
+                selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status,
+                ROW_NUMBER() OVER (
+                  PARTITION BY opportunity_id
+                  ORDER BY CASE WHEN owner_hash = $1 THEN 0 ELSE 1 END, updated_at DESC
+                ) AS rn
+           FROM public.bet_history
+          WHERE owner_hash IN ($1, $2)
+            AND opportunity_id <> $3
+       )
+       SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
+              selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY created_at DESC
+        LIMIT 1000`,
+      [hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID],
+    );
 
-  return NextResponse.json({ bets: result.rows.map(mapRow), cloud: true });
+    return NextResponse.json({ bets: result.rows.map(mapRow), cloud: true });
+  } catch (error) {
+    console.error("tracker_read_failed", error);
+    return NextResponse.json({ error: "tracker_read_failed" }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -161,6 +178,12 @@ export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id")?.slice(0, 180);
   if (!id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
 
-  const result = await pool.query("DELETE FROM public.bet_history WHERE owner_hash = $1 AND id = $2", [hash, id]);
+  const result = await pool.query(
+    `DELETE FROM public.bet_history
+      WHERE id = $1
+        AND owner_hash IN ($2, $3)
+        AND opportunity_id <> $4`,
+    [id, hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID],
+  );
   return NextResponse.json({ deleted: result.rowCount ?? 0, cloud: true });
 }
