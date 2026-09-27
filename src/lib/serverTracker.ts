@@ -7,3 +7,4 @@ export const SERVER_DETECTION_OWNER_HASH = createHash("sha256")
   .digest("hex");
 
 export const SYSTEM_QUOTA_OPPORTUNITY_ID = "__system_quota__";
+export const SYSTEM_SETTLEMENT_OPPORTUNITY_ID = "__system_settlement__";
