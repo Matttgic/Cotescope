@@ -21,6 +21,11 @@ export type OddsApiResult = {
   quota: { remaining: number | null; used: number | null; lastCost: number | null };
 };
 
+type OddsWindow = {
+  commenceTimeFrom?: string;
+  commenceTimeTo?: string;
+};
+
 const MIN_PREMATCH_LEAD_MS = 5 * 60 * 1000;
 const MAX_QUOTE_AGE_SECONDS = 120;
 const MAX_BOOKMAKER_SKEW_SECONDS = 60;
@@ -81,7 +86,10 @@ function opportunityId(event: ApiEvent, commenceAt: number, bookmakerKey: string
   ].join("|");
 }
 
-export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promise<OddsApiResult> {
+export async function fetchFrenchH2HOpportunities(
+  sportKey = "upcoming",
+  window: OddsWindow = {},
+): Promise<OddsApiResult> {
   const apiKey = process.env.THE_ODDS_API_KEY;
   if (!apiKey) throw new Error("THE_ODDS_API_KEY is not configured");
   if (!/^[a-z0-9_]+$/.test(sportKey)) throw new Error("Invalid sport key");
@@ -94,6 +102,8 @@ export async function fetchFrenchH2HOpportunities(sportKey = "upcoming"): Promis
   url.searchParams.set("markets", "h2h");
   url.searchParams.set("oddsFormat", "decimal");
   url.searchParams.set("dateFormat", "iso");
+  if (window.commenceTimeFrom) url.searchParams.set("commenceTimeFrom", window.commenceTimeFrom);
+  if (window.commenceTimeTo) url.searchParams.set("commenceTimeTo", window.commenceTimeTo);
 
   const response = await fetch(url, { cache: "no-store" });
   const quota = {
