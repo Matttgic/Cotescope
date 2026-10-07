@@ -248,6 +248,11 @@ test("the default real feed works without database access and never falls back t
     assert.equal(data.demo, false);
     assert.deepEqual(data.opportunities, []);
     assert.equal(reads, 1);
+    const health = loadTS("src/app/api/health/route.ts");
+    const status = await (await health.GET()).json();
+    assert.equal(status.mode, "cotes-value");
+    assert.equal(status.providerConfigured, true);
+    assert.equal(reads, 1, "Health does not fetch the upstream provider");
     const invalid = await route.GET(
       new Request("http://local/api/opportunities?mode=unknown"),
     );
