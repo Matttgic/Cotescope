@@ -152,6 +152,9 @@ const { chromium } = require("playwright");
     await page
       .getByRole("button", { name: "Performance", exact: true })
       .click();
+    await page
+      .getByRole("button", { name: "Mon journal", exact: true })
+      .click();
     assert.ok(
       (await page.locator(".stats-grid").innerText()).includes("-100,0"),
     );
@@ -617,8 +620,17 @@ const { chromium } = require("playwright");
         }),
       }),
     );
-    await page.getByRole("button", { name: "CoteScope", exact: true }).click();
-    await page.locator(".opportunity-row").first().waitFor();
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/cotescope") &&
+          response.status() === 200,
+      ),
+      page.getByRole("button", { name: "CoteScope", exact: true }).click(),
+    ]);
+    await page.waitForFunction(
+      () => document.querySelectorAll(".opportunity-row").length === 1,
+    );
     assert.equal(await page.locator(".opportunity-row").count(), 1);
     await page.locator(".decision-diagnostics summary").click();
     await page.screenshot({
@@ -672,6 +684,112 @@ const { chromium } = require("playwright");
         fullPage: true,
       });
     }
+    const { newPaperState, paperMetrics, openPaperTrades } = loadTS(
+      "src/lib/paperTrading.ts",
+    );
+    const paperTime = Date.now();
+    const paperState = {
+      ...newPaperState("cotescope", paperTime),
+      lastCycleAt: new Date(paperTime).toISOString(),
+      cycleCount: 1,
+    };
+    const paperLedger = openPaperTrades(
+      "cotescope",
+      own.opportunities,
+      [],
+      paperTime,
+      paperState.startedAt,
+    );
+    await page.route("**/api/paper", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          simulation: true,
+          version: "paper-v1",
+          cronConfigured: true,
+          portfolios: [
+            {
+              mode: "cotescope",
+              state: paperState,
+              metrics: paperMetrics(paperLedger, 1000, paperTime),
+              latest: paperLedger,
+            },
+            {
+              mode: "cotes-value",
+              state: { ...paperState, mode: "cotes-value" },
+              metrics: paperMetrics([], 1000, paperTime),
+              latest: [],
+            },
+          ],
+        }),
+      }),
+    );
+    await page
+      .getByRole("button", { name: "Performance", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Test automatique", exact: true })
+      .click();
+    await page
+      .getByText("Simulation automatique active", { exact: true })
+      .waitFor();
+    await page
+      .getByRole("heading", { name: "Votre bankroll se teste toute seule." })
+      .waitFor();
+    assert.ok(
+      (await page.locator(".stats-grid").innerText()).includes("1\u202f000,00"),
+    );
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+      );
+      await page.screenshot({
+        path: artifact + "/paper-" + width + ".png",
+        fullPage: true,
+      });
+    }
+    await page
+      .getByRole("button", { name: "Témoin cotes-value", exact: true })
+      .click();
+    await page
+      .getByText("Le test commence à 1 000 €.", { exact: true })
+      .waitFor();
+    await page.route("**/api/paper", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          simulation: true,
+          version: "paper-v1",
+          cronConfigured: false,
+          portfolios: [
+            {
+              mode: "cotescope",
+              state: null,
+              metrics: paperMetrics([], 1000),
+              latest: [],
+            },
+            {
+              mode: "cotes-value",
+              state: null,
+              metrics: paperMetrics([], 1000),
+              latest: [],
+            },
+          ],
+        }),
+      }),
+    );
+    await page
+      .getByRole("button", { name: "Actualiser le test", exact: true })
+      .click();
+    await page
+      .getByText("Planification à configurer", { exact: true })
+      .waitFor();
     assert.deepEqual(errors, []);
     console.log(
       "Browser checks passed: filters, explicit recording, settlement, ROI, persistence, CSV, arbitrage, settings, source errors, dialog keyboard access responsive layouts, published simulation filters, measured CLV, partial settlement arithmetic and market evidence.",

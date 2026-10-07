@@ -1,34 +1,49 @@
-name: CoteScope Server Scan
+name: CoteScope Paper Simulation
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/scan-cron.yml"
+      - "src/lib/paperTrading.ts"
+      - "src/lib/paperStore.ts"
+      - "src/app/api/cron/paper/**"
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: cotescope-paper
+  cancel-in-progress: false
+
 jobs:
-  scan:
+  paper:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Trigger secure CoteScope scan and settlement
+      - name: Wait for the paper deployment
+        run: |
+          for attempt in $(seq 1 18); do
+            if curl --fail --silent --show-error --max-time 10 https://cotescope.vercel.app/api/paper > /dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "The paper endpoint is not ready; check the Vercel deployment and database."
+          exit 1
+      - name: Run prospective virtual portfolios and settlement
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "CRON_SECRET is not configured; skipping scan."
-            exit 0
+            echo "CRON_SECRET is missing in GitHub Actions; paper simulation cannot run."
+            exit 1
           fi
 
           curl --fail --silent --show-error \
-            --retry 2 \
-            --retry-delay 5 \
             -H "Authorization: Bearer $CRON_SECRET" \
-            https://cotescope.vercel.app/api/cron/scan
-
-          echo
-
-          curl --fail --silent --show-error \
-            --retry 2 \
-            --retry-delay 5 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            https://cotescope.vercel.app/api/cron/settle
+            --max-time 55 \
+            https://cotescope.vercel.app/api/cron/paper

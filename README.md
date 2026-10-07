@@ -1,6 +1,6 @@
 # CoteScope
 
-Une console française pour comparer les prix, examiner l’EV et tenir un journal de prises. Méthode de décision CoteScope robuste par défaut, prix publiés par cotes-value, calculs inspectables et suivi volontaire. La [méthode et sa comparaison exploratoire](docs/METHOD.md) distinguent la décision de la collecte et rendent les limites mesurables.
+Une console française pour comparer les prix, examiner l’EV et tenir un journal de prises. Méthode de décision CoteScope robuste par défaut, prix publiés par cotes-value, calculs inspectables et [test automatique de deux bankrolls virtuelles de 1 000 €](docs/PAPER.md). La [méthode et sa comparaison exploratoire](docs/METHOD.md) distinguent la décision de la collecte et rendent les limites mesurables.
 
 ## Démarrer
 
@@ -46,7 +46,9 @@ Le scanner filtre par sport, bookmaker, marché, recherche, EV, score et cote ma
 
 Le **Journal** enregistre uniquement les prises ajoutées par l’utilisateur. Mises, résultats (y compris demi-gain et demi-perte), export CSV, export JSON des preuves et synchronisation personnelle sont disponibles. Chaque nouvelle prise conserve les prix, les références et les preuves publiées à cet instant. Ces captures restent intactes après modification du résultat. Les clés restent compatibles avec l’ancien tracker. La démo n’est jamais envoyée au cloud.
 
-**Performance** calcule le profit, le ROI sur les mises réglées, le taux de réussite, le résultat par bookmaker et la courbe des paris réglés par date d’enregistrement. Le ROI du journal conserve son dénominateur historique : mises avec gain ou perte, remboursements complets exclus. Les mises des demi-règlements sont comptées intégralement ; le taux de réussite binaire reste absent lorsqu’il y a des demi-règlements. Aucun historique de performance n’est inventé.
+**Performance** ouvre le **Test automatique** : deux portefeuilles prospectifs de 1 000 € virtuels, quart de Kelly plafonné à 1 % par prise, exposition maximale de 10 %, prises et règlements serveur même lorsque le site est fermé. Neon et la tâche GitHub Actions authentifiée sont nécessaires ; l’interface affiche le dernier cycle réellement réussi. Les règles et limites sont détaillées dans [docs/PAPER.md](docs/PAPER.md).
+
+**Mon journal** calcule le profit, le ROI sur les mises réglées, le taux de réussite, le résultat par bookmaker et la courbe des paris réglés par date d’enregistrement. Le ROI du journal conserve son dénominateur historique : mises avec gain ou perte, remboursements complets exclus. Les mises des demi-règlements sont comptées intégralement ; le taux de réussite binaire reste absent lorsqu’il y a des demi-règlements. Aucun historique de performance n’est inventé.
 
 Le sous-onglet **Bilan cotes-value** lit `/api/cotes-value/history` et le fichier actif `paris.json` de la branche `donnees`. Il affiche profit simulé, ROI (remboursements inclus), exposition et CLV moyenne avec sa couverture. Les archives mensuelles ne sont pas incluses. Filtres par référence, tranche A–E/X, sport, bookmaker, marché et statut ; chaque simulation expose ses prix et les preuves disponibles.
 

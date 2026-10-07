@@ -3139,3 +3139,30 @@ input {
 .comparison-details ul {
   padding-left: 20px;
 }
+.paper-mode {
+  margin-top: 18px;
+}
+.paper-trade {
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+  font-size: 12px;
+}
+.paper-trade summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+.paper-trade summary span {
+  min-width: 0;
+}
+.paper-trade small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.paper-trade p {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}

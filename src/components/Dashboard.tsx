@@ -42,8 +42,9 @@ export default function Dashboard({
   initialMode: DataSource;
 }) {
   const [nav, setNav] = useState("Scanner");
-  const [performanceView, setPerformanceView] = useState("journal");
+  const [performanceView, setPerformanceView] = useState("paper");
   const engineView = nav === "Performance" && performanceView === "engine";
+  const paperView = nav === "Performance" && performanceView === "paper";
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [items, setItems] = useState<Opportunity[]>([]);
   const [mode, setMode] = useState<DataSource>(initialMode);
@@ -78,7 +79,9 @@ export default function Dashboard({
   const toolsView = ["Arbitrages", "Méthode", "Comparaison"].includes(nav);
   const primaryNav = toolsView ? "Outils" : nav;
   const feedView =
-    ["Scanner", "Journal", "Performance"].includes(nav) && !engineView;
+    ["Scanner", "Journal", "Performance"].includes(nav) &&
+    !engineView &&
+    !paperView;
   const notify = useCallback((message: string) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -361,19 +364,21 @@ export default function Dashboard({
               }
             >
               <span className="status-dot" />
-              {engineView
-                ? "Simulations cotes-value"
-                : loading
-                  ? "Actualisation"
-                  : isDemo
-                    ? "Démonstration"
-                    : error
-                      ? "Indisponible"
-                      : source === "cotes-value"
-                        ? "Cotes-value"
-                        : source === "cotescope"
-                          ? "CoteScope robuste"
-                          : "Cache live"}
+              {paperView
+                ? "Test automatique virtuel"
+                : engineView
+                  ? "Simulations cotes-value"
+                  : loading
+                    ? "Actualisation"
+                    : isDemo
+                      ? "Démonstration"
+                      : error
+                        ? "Indisponible"
+                        : source === "cotes-value"
+                          ? "Cotes-value"
+                          : source === "cotescope"
+                            ? "CoteScope robuste"
+                            : "Cache live"}
             </span>
             <button
               className="icon-button"
@@ -419,7 +424,7 @@ export default function Dashboard({
                           ? "La méthode, à livre ouvert."
                           : nav === "Comparaison"
                             ? "Évaluez les deux méthodes."
-                          : "Votre cadre de travail."}
+                            : "Votre cadre de travail."}
               </h1>
               <p>
                 {nav === "Scanner"
@@ -429,14 +434,16 @@ export default function Dashboard({
                     : nav === "Performance"
                       ? engineView
                         ? "Les simulations publiées, leurs résultats et les clôtures vérifiables."
-                        : "Des résultats réalisés, un échantillon visible, aucune promesse."
+                        : paperView
+                          ? "Une bankroll virtuelle de 1 000 €, suivie automatiquement côté serveur."
+                          : "Des résultats réalisés, un échantillon visible, aucune promesse."
                       : nav === "Arbitrages"
                         ? "Un calculateur pour répartir une mise entre des issues exclusives."
                         : nav === "Méthode"
                           ? "Ce qui est mesuré, ce qui est estimé et ce qu’il reste à vérifier."
                           : nav === "Comparaison"
                             ? "Les décisions, les résultats disponibles et les limites de la comparaison."
-                          : "Bankroll, accès aux données et synchronisation du journal."}
+                            : "Bankroll, accès aux données et synchronisation du journal."}
               </p>
             </div>
             {feedView && (

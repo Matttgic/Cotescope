@@ -1,4 +1,5 @@
 import EnginePerformanceView from "./EnginePerformanceView";
+import PaperTradingView from "./PaperTradingView";
 import { money, number, percent } from "@/lib/format";
 import { journalStats, type Bet } from "@/lib/journal";
 import EquityChart from "./EquityChart";
@@ -29,6 +30,13 @@ export default function PerformanceView({
         aria-label="Source du bilan"
       >
         <button
+          className={view === "paper" ? "button primary" : "button secondary"}
+          aria-pressed={view === "paper"}
+          onClick={() => setView("paper")}
+        >
+          Test automatique
+        </button>
+        <button
           className={view === "journal" ? "button primary" : "button secondary"}
           aria-pressed={view === "journal"}
           onClick={() => setView("journal")}
@@ -43,7 +51,9 @@ export default function PerformanceView({
           Bilan cotes-value
         </button>
       </div>
-      {view === "engine" ? (
+      {view === "paper" ? (
+        <PaperTradingView />
+      ) : view === "engine" ? (
         <EnginePerformanceView />
       ) : (
         <>

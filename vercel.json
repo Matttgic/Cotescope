@@ -7,6 +7,8 @@
     "DEFAULT_DATA_SOURCE": "cotescope"
   },
   "functions": {
+    "src/app/api/cron/paper/route.ts": { "maxDuration": 60 },
+    "src/app/api/paper/route.ts": { "maxDuration": 20 },
     "src/app/api/cotescope/route.ts": { "maxDuration": 20 },
     "src/app/api/cotes-value/route.ts": { "maxDuration": 20 },
     "src/app/api/cotes-value/history/route.ts": { "maxDuration": 20 },

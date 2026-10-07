@@ -31,6 +31,14 @@ Chaque appareil doit utiliser la même clé privée de synchronisation via **Par
 
 Les relevés de plus de 15 minutes et les matchs commencés sont exclus. La fréquence réelle de publication du collecteur doit être surveillée ; l’absence de signal récent peut produire une liste vide. Aucun workflow ni budget PulseScore n’est modifié par cette publication.
 
-Le mode **Live** conserve le collecteur historique The Odds API, qui exige Neon, `THE_ODDS_API_KEY` et `CRON_SECRET`. Le workflow existant cible `https://cotescope.vercel.app` ; vérifier cette adresse et les secrets avant de l’utiliser. Il est distinct du mode par défaut cotes-value et du contrôle PulseScore limité à une requête.
+Le mode **Live** conserve les endpoints historiques The Odds API, qui exigent Neon, `THE_ODDS_API_KEY` et `CRON_SECRET`. Le workflow de ce dépôt appelle désormais uniquement la simulation paper et ne planifie plus cette collecte payante. Le collecteur cotes-value n’est pas modifié.
+
+## Test automatique de 1 000 € virtuels
+
+Le test demande la base Neon déjà configurée, les migrations `0001` puis `0002`, et **le même `CRON_SECRET`** dans les variables serveur Vercel et dans **GitHub → Matttgic/Cotescope → Settings → Secrets and variables → Actions**. Redéployer après ajout dans Vercel. Il ne demande aucune nouvelle clé PulseScore.
+
+Le workflow **CoteScope Paper Simulation** appelle `/api/cron/paper` toutes les cinq minutes ; GitHub peut retarder les exécutions. Il se déclenche aussi à la publication des fichiers paper et dispose de **Run workflow**. Un secret absent fait échouer la tâche explicitement.
+
+Vérifier `/api/paper` : réponse 200, `simulation: true`, `cronConfigured: true` puis `state.lastCycleAt` non nul pour chacun des deux portefeuilles. La présence du secret seule ne prouve pas que la planification fonctionne. Dans **Performance → Test automatique**, le dernier succès, les mises réservées et les résultats sont visibles ; une alerte apparaît après 20 minutes sans cycle réussi. Voir [PAPER.md](PAPER.md) pour le protocole et ses limites.
 
 La clé PulseScore entrée dans l’environnement de travail n’est pas automatiquement copiée dans Vercel. Elle n’est pas nécessaire pour la première version fondée sur les fichiers publics. Son diagnostic local n’est pas inclus dans le déploiement.
