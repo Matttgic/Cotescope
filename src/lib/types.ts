@@ -1,4 +1,5 @@
 import type { MarketIdentity } from "./markets";
+import type { DecisionEvidence } from "./decisionEngine";
 export type Sport =
   | "Football"
   | "Tennis"
@@ -34,6 +35,7 @@ export type Opportunity = {
   confidence: "Forte" | "Moyenne" | "Faible";
   highOddsGuard: boolean;
   isBoost: boolean;
+  method?: DecisionEvidence;
   marketIdentity?: MarketIdentity;
   evidence?: {
     detectedAt: string;

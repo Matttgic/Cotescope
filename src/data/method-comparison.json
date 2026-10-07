@@ -1,0 +1,115 @@
+{
+  "schema": "cotescope.comparison.v1",
+  "methodVersion": "robust-v1",
+  "generatedAt": "2026-10-07T21:59:56.128Z",
+  "sourceRevision": "7fed7e82988c55e3082226626818081508067ddc",
+  "period": {
+    "from": "2026-10-05",
+    "to": "2026-10-07"
+  },
+  "policy": {
+    "minEdgePct": 2,
+    "maxAgeSeconds": 900,
+    "soloMaxAgeSeconds": 180,
+    "maxTimeSkewSeconds": 120,
+    "minAssociation": 0.9,
+    "soloMinAssociation": 0.95,
+    "baseProbabilityBuffer": 0.004,
+    "soloProbabilityBuffer": 0.006,
+    "ageProbabilityBuffer": 0.004,
+    "maxProbabilitySpread": 0.06,
+    "maxOdds": 6,
+    "maxStakeFraction": 0.01
+  },
+  "sources": [
+    {
+      "file": "2026-10-05.jsonl.gz",
+      "sha256": "d92565978b063de90d98cd85fdfbdd3e2a4e0cbbacf95f61f89fcd73a4be7ebc",
+      "rows": 4068
+    },
+    {
+      "file": "2026-10-06.jsonl.gz",
+      "sha256": "c71785aa198315e393071536140147545d51e1068c04fee47faddc432025b774",
+      "rows": 32581
+    },
+    {
+      "file": "2026-10-07.jsonl.gz",
+      "sha256": "6d09b397f246212f4c4ed4e563f35c6d0664f48d5c22ef34485fb6400ece3bc5",
+      "rows": 8073
+    }
+  ],
+  "settlementsSha256": "f703f869686bfa41cc0886740265910556cbd5066e215912e36049e451bced9f",
+  "quality": {
+    "rows": 44722,
+    "snapshots": 1650,
+    "distinctCandidates": 4150,
+    "rawReferenceRows": 40887,
+    "missingReferenceTime": 0,
+    "missingAssociation": 253,
+    "invalidSettlements": 0
+  },
+  "baseline": {
+    "selected": 21,
+    "settled": 9,
+    "missing": 12,
+    "conflicting": 0,
+    "coveragePct": 42.857142857142854,
+    "flatStakeProfitUnits": 3.3100000000000005,
+    "flatStakeRoiPct": 36.77777777777778,
+    "wins": 4,
+    "losses": 5,
+    "voids": 0,
+    "averageQuotedEdgePct": 5.186720476190478
+  },
+  "cotescope": {
+    "selected": 1,
+    "settled": 1,
+    "missing": 0,
+    "conflicting": 0,
+    "coveragePct": 100,
+    "flatStakeProfitUnits": 1.9500000000000002,
+    "flatStakeRoiPct": 195.00000000000003,
+    "wins": 1,
+    "losses": 0,
+    "voids": 0,
+    "averageQuotedEdgePct": 3.461088888888897
+  },
+  "commonSelections": 1,
+  "perDay": {
+    "2026-10-05": {
+      "snapshots": 138,
+      "rows": 4068,
+      "baseline": 0,
+      "cotescope": 0
+    },
+    "2026-10-06": {
+      "snapshots": 892,
+      "rows": 32581,
+      "baseline": 0,
+      "cotescope": 0
+    },
+    "2026-10-07": {
+      "snapshots": 620,
+      "rows": 8073,
+      "baseline": 21,
+      "cotescope": 1
+    }
+  },
+  "rejected": {
+    "reference": 25096,
+    "settlement": 790,
+    "identity": 148
+  },
+  "conclusion": "Comparaison exploratoire conditionnelle aux candidats déjà publiés par cotes-value. Aucune supériorité démontrée.",
+  "limitations": [
+    "3 jour(s) seulement ; dernier jour partiel. Aucun échantillon prospectif indépendant.",
+    "Archives présélectionnées par cotes-value à partir de 2 % d’écart : les prix et paris non publiés sont absents.",
+    "Référence de comparaison : ancien adaptateur contrôlé, marchés binaires et cotes ≤ 6 ; pas toutes les simulations Python.",
+    "Prises à la première détection admissible. CoteScope limite à une prise par match reconnu ; la référence peut cumuler plusieurs marchés.",
+    "Mise fixe de 1 unité, sans capitalisation, limites opérateurs, commission ni frais ; ROI sur prises réglées, remboursements inclus.",
+    "Règlements publiés avec gain cohérent et heure postérieure au début ; résultats indépendants non vérifiés.",
+    "Résultats manquants et conflits exclus du ROI et conservés dans le décompte de couverture. Les cohortes réglées peuvent différer.",
+    "Probabilités, correspondances et contrôle des marchés fournis par le collecteur existant ; pas de modèle sportif autonome.",
+    "Seuils et poids heuristiques fixes. La marge prudente ne constitue pas une borne statistique."
+  ]
+}

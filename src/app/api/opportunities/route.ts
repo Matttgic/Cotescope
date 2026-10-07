@@ -4,6 +4,7 @@ import { evidenceScore, passesHighOddsGuard } from "@/lib/value";
 import type { Opportunity, Sport } from "@/lib/types";
 import { defaultDataSource } from "@/lib/dataSource";
 import { GET as publishedOpportunities } from "../cotes-value/route";
+import { GET as robustOpportunities } from "../cotescope/route";
 import {
   SERVER_DETECTION_OWNER_HASH,
   SYSTEM_QUOTA_OPPORTUNITY_ID,
@@ -84,13 +85,16 @@ export async function GET(request: Request) {
   const requested = new URL(request.url).searchParams.get("mode");
   if (
     requested &&
-    !["demo", "live", "theoddsapi", "cotes-value"].includes(requested)
+    !["demo", "live", "theoddsapi", "cotes-value", "cotescope"].includes(
+      requested,
+    )
   )
     return Response.json(
       { error: "invalid_source", opportunities: [] },
       { status: 400 },
     );
   const mode = defaultDataSource(requested || process.env.DEFAULT_DATA_SOURCE);
+  if (mode === "cotescope") return robustOpportunities();
   if (mode === "cotes-value") return publishedOpportunities();
   if (mode === "demo") {
     return Response.json({

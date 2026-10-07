@@ -114,7 +114,9 @@ export default function ScannerView({
                 <p>
                   {isDemo
                     ? "Exemples pour explorer votre stratégie de sélection."
-                    : "Les signaux de plus de 15 minutes sont écartés."}
+                    : source === "cotescope"
+                      ? "Avantage prudent ≥ 2 % · une référence isolée expire à 3 minutes."
+                      : "Les signaux de plus de 15 minutes sont écartés."}
                 </p>
               </div>
               <label className="sort-select">
@@ -418,7 +420,7 @@ export default function ScannerView({
                     Garde-fou {filters.guarded ? "activé" : "désactivé"}
                   </span>
                   <span>
-                    {source === "cotes-value"
+                    {source === "cotes-value" || source === "cotescope"
                       ? "France · Multi-référence"
                       : "France · Référence Pinnacle"}
                   </span>

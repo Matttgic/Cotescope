@@ -14,17 +14,17 @@ export default function MethodView({ isDemo }: Props) {
           [
             "02",
             "Retirer la marge",
-            "La méthode power transforme les cotes de toutes les issues en probabilités dont la somme vaut 100 %. Elle produit une estimation du marché, pas une vérité sur le match.",
+            "Le collecteur fournit des probabilités de référence déjà corrigées de la marge. CoteScope les recalcule en une médiane pondérée, sans reprendre le Consensus publié : Pinnacle 1, Betfair 0,85, Polymarket et Kalshi 0,5. Ces poids sont heuristiques.",
           ],
           [
             "03",
-            "Mesurer l’écart",
-            "EV = cote bookmaker / cote juste − 1. Sur un pari binaire, +5 % correspond à +0,50 € attendus pour 10 € misés si la probabilité estimée est correcte. Avec remboursement ou demi-règlement, cet écart de prix n’est pas une espérance inconditionnelle.",
+            "Tester l’avantage prudent",
+            "CoteScope retire 0,4 point de probabilité, la moitié du désaccord entre références et jusqu’à 0,4 point pour l’âge des prix. Une référence isolée ajoute 0,6 point. Le prix doit rester avantageux d’au moins 2 % après ce scénario de stress. Ce scénario n’est pas une borne statistique.",
           ],
           [
             "04",
             "Maîtriser l’exposition",
-            "Le quart de Kelly est réservé aux marchés binaires, plafonné à 2 % de la bankroll. Les grosses cotes demandent des contrôles supplémentaires. Les paris corrélés restent à examiner manuellement.",
+            "Une sélection par match reconnu, quart de Kelly sur la probabilité prudente et prises plafonnées à 1 % de la bankroll. Les marchés avec remboursement ou demi-règlement sont exclus de cette méthode faute de probabilités de règlement. Le journal conserve leur suivi dans le mode de comparaison cotes-value.",
           ],
         ].map(([n, title, body]) => (
           <article className="panel method-card" key={n}>
@@ -37,7 +37,9 @@ export default function MethodView({ isDemo }: Props) {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">INSPIRÉ DE COTES-VALUE</span>
+            <span className="eyebrow">
+              DÉCISION COTESCOPE · PRIX COTES-VALUE
+            </span>
             <h2>Une meilleure sélection commence par une preuve.</h2>
           </div>
           <Icon name="shield" size={25} />
@@ -45,38 +47,45 @@ export default function MethodView({ isDemo }: Props) {
         <div className="source-row">
           <span className="source-dot" />
           <strong>Pinnacle</strong>
-          <span>Référence H2H du moteur CoteScope</span>
+          <span>
+            Seule référence autorisée isolément : association ≥ 0,95 et relevé ≤
+            3 minutes
+          </span>
           <span className="pill">
-            {isDemo ? "ILLUSTRATION" : "CACHE SERVEUR"}
+            {isDemo ? "ILLUSTRATION" : "RÉFÉRENCE UNITAIRE"}
           </span>
         </div>
         <div className="source-row">
           <span className="source-dot muted-dot" />
           <strong>Betfair / Polymarket / Kalshi</strong>
-          <span>Raccordés via le flux publié de cotes-value</span>
+          <span>
+            Références unitaires horodatées ; association ≥ 0,90 et lecture à
+            moins de 2 minutes du prix
+          </span>
           <span className="pill">FLUX COTES-VALUE</span>
         </div>
         <div className="method-limits">
           <h3>Ce que le score ne dit pas</h3>
           <p>
-            Le score est heuristique. Ce n’est ni un taux de réussite, ni une
-            certitude de gain. Le consensus, la stabilité et la liquidité ne
-            sont pas mesurés par le provider CoteScope actuel. Le mode
-            Cotes-value regroupe les références d’une même cote, sélectionne le
-            consensus disponible et écarte les marchés suspects ou non
-            conformes. Les résultats, handicaps, totaux, doubles chances, scores
-            exacts et périodes canoniques sont raccordés. Le bilan importe les
-            simulations publiées avec leurs preuves de prise et de règlement
-            lorsqu’elles existent. Les demi-règlements sont suivis dans le
-            journal personnel et le bilan. Chaque nouvelle prise conserve les
-            preuves disponibles au moment de son enregistrement.
+            Le score représente une qualité documentaire heuristique. La méthode
+            CoteScope ne prédit pas les performances sportives : elle évalue
+            différemment les prix de référence publiés par le collecteur
+            existant. Les composants sans horodatage propre et le Consensus
+            agrégé ne comptent pas comme références supplémentaires. Aucun
+            avantage de liquidité ou de stabilité temporelle n’est inventé. Les
+            seuils ne sont pas ajustés aux gains historiques. La comparaison
+            chronologique disponible dans Outils → Comparaison est trop courte
+            pour démontrer un rendement supérieur.
           </p>
           <h3>Fraîcheur et données live</h3>
           <p>
-            La console écarte les snapshots de plus de 15 minutes et les matchs
-            commencés. Le collecteur exige des cotes de moins de 120 secondes.
-            Actualiser la page lit le cache ; cela ne déclenche pas de collecte
-            payante.
+            La collecte reste celle de cotes-value : son univers est déjà
+            filtré. CoteScope écarte les matchs commencés, les relevés de plus
+            de 15 minutes et les références désynchronisées. Une référence
+            isolée expire après 3 minutes. Actualiser la page relit le flux
+            public sans appel payant. La sélection par match dépend de
+            l’identité disponible ; des alias différents peuvent empêcher de
+            reconnaître deux événements identiques.
           </p>
         </div>
       </section>

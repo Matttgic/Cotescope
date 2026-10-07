@@ -1,5 +1,6 @@
 import type { Opportunity } from "./types";
 import { identifyMarket, type MarketIdentity } from "./markets";
+import type { DecisionEvidence } from "./decisionEngine";
 export type BetCapture = {
   version: 1;
   capturedAt: string;
@@ -12,6 +13,7 @@ export type BetCapture = {
   marketIdentity?: MarketIdentity;
   evidence?: Opportunity["evidence"];
   references: NonNullable<Opportunity["references"]>;
+  method?: DecisionEvidence;
 };
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -64,6 +66,55 @@ export function normalizeCapture(input: unknown): BetCapture | null {
     });
   }
   let marketIdentity: MarketIdentity | undefined;
+  let method: DecisionEvidence | undefined;
+  if (c.method !== undefined) {
+    const m = c.method;
+    if (
+      !object(m) ||
+      m.version !== "robust-v1" ||
+      !finite(m.centralProbability) ||
+      !finite(m.conservativeProbability) ||
+      m.centralProbability <= 0 ||
+      m.centralProbability >= 1 ||
+      m.conservativeProbability <= 0 ||
+      m.conservativeProbability > m.centralProbability ||
+      !finite(m.probabilityBuffer) ||
+      Math.abs(
+        m.centralProbability - m.conservativeProbability - m.probabilityBuffer,
+      ) > 1e-8 ||
+      !finite(m.dispersion) ||
+      m.dispersion < 0 ||
+      m.dispersion > 1 ||
+      !finite(m.referenceCount) ||
+      !Number.isInteger(m.referenceCount) ||
+      m.referenceCount < 1 ||
+      m.referenceCount > 4 ||
+      !finite(m.nominalEdgePct) ||
+      Math.abs(
+        (c.bookmakerOdds * m.centralProbability - 1) * 100 - m.nominalEdgePct,
+      ) > 0.1 ||
+      !finite(m.conservativeEdgePct) ||
+      Math.abs(m.conservativeEdgePct - c.evPct) > 0.1 ||
+      Math.abs(1 / c.fairOdds - m.conservativeProbability) > 1e-8 ||
+      !finite(m.stakeFraction) ||
+      m.stakeFraction < 0 ||
+      m.stakeFraction > 0.01 ||
+      !text(m.eventKey, 1000)
+    )
+      return null;
+    method = {
+      version: "robust-v1",
+      centralProbability: m.centralProbability,
+      conservativeProbability: m.conservativeProbability,
+      probabilityBuffer: m.probabilityBuffer,
+      referenceCount: m.referenceCount,
+      dispersion: m.dispersion,
+      nominalEdgePct: m.nominalEdgePct,
+      conservativeEdgePct: m.conservativeEdgePct,
+      stakeFraction: m.stakeFraction,
+      eventKey: m.eventKey,
+    };
+  }
   if (c.marketIdentity !== undefined) {
     if (!object(c.marketIdentity)) return null;
     marketIdentity =
@@ -127,6 +178,7 @@ export function normalizeCapture(input: unknown): BetCapture | null {
     marketIdentity,
     evidence,
     references,
+    ...(method ? { method } : {}),
   };
 }
 export function captureOpportunity(
@@ -146,6 +198,7 @@ export function captureOpportunity(
       marketIdentity: item.marketIdentity,
       evidence: item.evidence,
       references: item.references || [],
+      ...(item.method ? { method: item.method } : {}),
     }) || undefined
   );
 }

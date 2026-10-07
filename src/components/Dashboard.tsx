@@ -10,6 +10,10 @@ import {
 } from "@/lib/scanner";
 import type { Opportunity } from "@/lib/types";
 import type { DataSource } from "@/lib/dataSource";
+import {
+  REJECTION_LABELS,
+  type DecisionDiagnostics,
+} from "@/lib/decisionEngine";
 import { fractionalKelly } from "@/lib/value";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ArbitrageView from "./ArbitrageView";
@@ -17,6 +21,7 @@ import Icon from "./Icon";
 import Image from "next/image";
 import JournalView from "./JournalView";
 import MethodView from "./MethodView";
+import MethodComparisonView from "./MethodComparisonView";
 import PerformanceView from "./PerformanceView";
 import EvidenceView from "./EvidenceView";
 import SettingsView from "./SettingsView";
@@ -47,6 +52,9 @@ export default function Dashboard({
   const [error, setError] = useState("");
   const [updated, setUpdated] = useState("");
   const [source, setSource] = useState("");
+  const [diagnostics, setDiagnostics] = useState<DecisionDiagnostics | null>(
+    null,
+  );
   const [now, setNow] = useState(0);
   const [selected, setSelected] = useState<Opportunity | null>(null);
   const [stake, setStake] = useState(10);
@@ -67,7 +75,7 @@ export default function Dashboard({
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const pageContent = useRef<HTMLDivElement>(null);
-  const toolsView = nav === "Arbitrages" || nav === "Méthode";
+  const toolsView = ["Arbitrages", "Méthode", "Comparaison"].includes(nav);
   const primaryNav = toolsView ? "Outils" : nav;
   const feedView =
     ["Scanner", "Journal", "Performance"].includes(nav) && !engineView;
@@ -84,9 +92,11 @@ export default function Dashboard({
     setError("");
     try {
       const response = await fetch(
-        mode === "cotes-value"
-          ? "/api/cotes-value"
-          : "/api/opportunities" + (mode ? "?mode=" + mode : ""),
+        mode === "cotescope"
+          ? "/api/cotescope"
+          : mode === "cotes-value"
+            ? "/api/cotes-value"
+            : "/api/opportunities" + (mode ? "?mode=" + mode : ""),
         { signal: controller.signal, cache: "no-store" },
       );
       const data = await response.json();
@@ -96,16 +106,20 @@ export default function Dashboard({
             ? "Le scanner live attend une base Neon configurée et un premier scan. Vous pouvez explorer la démonstration."
             : data.error === "cotes_value_unavailable"
               ? "Le flux cotes-value est indisponible. Aucun exemple ne remplace les données réelles."
-              : "Le relevé est indisponible. Réessayez dans un instant.",
+              : data.error === "cotescope_source_unavailable"
+                ? "Les prix du flux cotes-value sont indisponibles pour la méthode CoteScope. Aucun exemple ne remplace les données réelles."
+                : "Le relevé est indisponible. Réessayez dans un instant.",
         );
       setItems(Array.isArray(data.opportunities) ? data.opportunities : []);
       setDemo(Boolean(data.demo));
       setSource(data.source || "");
+      setDiagnostics(data.diagnostics || null);
       setUpdated(data.generatedAt);
       setNow(Date.now());
     } catch (e) {
       if (controller.signal.aborted) return;
       setItems([]);
+      setDiagnostics(null);
       setDemo(false);
       setError(e instanceof Error ? e.message : "Connexion indisponible.");
     } finally {
@@ -167,6 +181,15 @@ export default function Dashboard({
   );
   const displayedBets = isDemo ? demoBets : personal;
   const stats = journalStats(displayedBets);
+  const methodExposure = selected?.method
+    ? personal
+        .filter(
+          (b) =>
+            b.status === "open" &&
+            b.capture?.method?.eventKey === selected.method!.eventKey,
+        )
+        .reduce((sum, b) => sum + b.stake, 0)
+    : 0;
   const books = [...new Set(items.map((o) => o.bookmaker))].sort();
   const sports = [...new Set(items.map((o) => o.sport))].sort();
   const average = visible.length
@@ -188,7 +211,8 @@ export default function Dashboard({
   const kelly =
     selected && binary
       ? bankroll *
-        fractionalKelly(selected.bookmakerOdds, 1 / selected.fairOdds)
+        (selected.method?.stakeFraction ??
+          fractionalKelly(selected.bookmakerOdds, 1 / selected.fairOdds))
       : 0;
   const roi = arbitrageRoiPct(arbOdds);
   const stakes = arbitrageStakes(arbOdds, arbStake);
@@ -231,6 +255,7 @@ export default function Dashboard({
       !journal.loaded ||
       !Number.isFinite(stake) ||
       stake <= 0 ||
+      (selected.method && (methodExposure > 0 || stake > bankroll * 0.01)) ||
       stake > bankroll - stats.exposure
     )
       return;
@@ -346,7 +371,9 @@ export default function Dashboard({
                       ? "Indisponible"
                       : source === "cotes-value"
                         ? "Cotes-value"
-                        : "Cache live"}
+                        : source === "cotescope"
+                          ? "CoteScope robuste"
+                          : "Cache live"}
             </span>
             <button
               className="icon-button"
@@ -390,6 +417,8 @@ export default function Dashboard({
                         ? "Équilibrez les issues."
                         : nav === "Méthode"
                           ? "La méthode, à livre ouvert."
+                          : nav === "Comparaison"
+                            ? "Évaluez les deux méthodes."
                           : "Votre cadre de travail."}
               </h1>
               <p>
@@ -405,6 +434,8 @@ export default function Dashboard({
                         ? "Un calculateur pour répartir une mise entre des issues exclusives."
                         : nav === "Méthode"
                           ? "Ce qui est mesuré, ce qui est estimé et ce qu’il reste à vérifier."
+                          : nav === "Comparaison"
+                            ? "Les décisions, les résultats disponibles et les limites de la comparaison."
                           : "Bankroll, accès aux données et synchronisation du journal."}
               </p>
             </div>
@@ -422,6 +453,16 @@ export default function Dashboard({
           {feedView && (
             <div className="feed-toolbar">
               <div className="segmented" aria-label="Source des données">
+                <button
+                  className={mode === "cotescope" ? "active" : ""}
+                  aria-pressed={mode === "cotescope"}
+                  onClick={() => {
+                    setMode("cotescope");
+                    setSelected(null);
+                  }}
+                >
+                  CoteScope
+                </button>
                 <button
                   className={mode === "demo" ? "active" : ""}
                   aria-pressed={mode === "demo"}
@@ -458,7 +499,9 @@ export default function Dashboard({
                   ? "Données illustratives · aucun prix réel"
                   : source === "cotes-value"
                     ? "Flux réel · marchés contrôlés · consensus prioritaire"
-                    : "Snapshots serveur · les cotes peuvent évoluer"}
+                    : source === "cotescope"
+                      ? "Méthode robuste · avantage prudent · prix cotes-value"
+                      : "Snapshots serveur · les cotes peuvent évoluer"}
               </p>
               {updated && !error && (
                 <span className="last-update">
@@ -467,6 +510,27 @@ export default function Dashboard({
                 </span>
               )}
             </div>
+          )}
+          {feedView && mode === "cotescope" && diagnostics && (
+            <details className="panel decision-diagnostics">
+              <summary>
+                {diagnostics.selected} sélection(s) CoteScope ·{" "}
+                {diagnostics.candidates} candidats publiés examinés
+              </summary>
+              <p>
+                Une sélection par match reconnu. Les seuils sont fixes ; la
+                rentabilité de cette méthode reste à mesurer.{" "}
+                {diagnostics.invalidRows} ligne(s) invalide(s) exclue(s).
+              </p>
+              <dl className="decision-reasons">
+                {Object.entries(diagnostics.rejected).map(([reason, count]) => (
+                  <div key={reason}>
+                    <dt>{REJECTION_LABELS[reason] || reason}</dt>
+                    <dd>{count}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           )}
           {error && feedView && (
             <div role="alert" className="notice warning">
@@ -540,6 +604,7 @@ export default function Dashboard({
                 tabs={[
                   { id: "Arbitrages", label: "Arbitrages" },
                   { id: "Méthode", label: "Méthode" },
+                  { id: "Comparaison", label: "Comparaison" },
                 ]}
               />
               <div
@@ -561,6 +626,7 @@ export default function Dashboard({
                   />
                 )}
                 {nav === "Méthode" && <MethodView isDemo={isDemo} />}
+                {nav === "Comparaison" && <MethodComparisonView />}
               </div>
             </>
           )}
@@ -680,12 +746,26 @@ export default function Dashboard({
                 "Score heuristique : les composantes de qualité ne sont pas toutes mesurées."}
             </p>
             <div className="stake-panel">
+              {selected.method && (
+                <div className="notice method-proof">
+                  <strong>CoteScope · {selected.method.version}</strong>
+                  <p>
+                    Avantage central {percent(selected.method.nominalEdgePct)} →
+                    prudent {percent(selected.method.conservativeEdgePct)}.
+                    Retrait de{" "}
+                    {number(selected.method.probabilityBuffer * 100, 2)} points
+                    de probabilité ; {selected.method.referenceCount}{" "}
+                    référence(s) horodatée(s). Ce scénario de stress ne
+                    constitue pas un intervalle de confiance.
+                  </p>
+                </div>
+              )}
               <h3>Simuler la mise</h3>
               {binary ? (
                 <p>
-                  Quart de Kelly : <strong>{money(kelly)}</strong> · plafond 2 %
-                  de {money(bankroll)}. Ce calcul suppose une probabilité
-                  correcte.
+                  Quart de Kelly : <strong>{money(kelly)}</strong> · plafond{" "}
+                  {selected.method ? "1" : "2"} % de {money(bankroll)}. Ce
+                  calcul suppose une probabilité correcte.
                 </p>
               ) : (
                 <p>
@@ -734,9 +814,20 @@ export default function Dashboard({
                 La mise dépasse la bankroll disponible après exposition.
               </p>
             )}
+            {selected.method &&
+              (methodExposure > 0 || stake > bankroll * 0.01) && (
+                <p className="text-danger">
+                  CoteScope limite les prises à 1 % de la bankroll et à une
+                  prise ouverte par match reconnu.
+                </p>
+              )}
             <button
               className="button primary full-width"
               disabled={
+                Boolean(
+                  selected.method &&
+                    (methodExposure > 0 || stake > bankroll * 0.01),
+                ) ||
                 !eligible ||
                 !!tracked ||
                 !journal.loaded ||

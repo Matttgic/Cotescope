@@ -4,9 +4,10 @@
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
   "env": {
-    "DEFAULT_DATA_SOURCE": "cotes-value"
+    "DEFAULT_DATA_SOURCE": "cotescope"
   },
   "functions": {
+    "src/app/api/cotescope/route.ts": { "maxDuration": 20 },
     "src/app/api/cotes-value/route.ts": { "maxDuration": 20 },
     "src/app/api/cotes-value/history/route.ts": { "maxDuration": 20 },
     "src/app/api/opportunities/route.ts": { "maxDuration": 20 }

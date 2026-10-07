@@ -3083,3 +3083,59 @@ input {
     padding: 3px 7px;
   }
 }
+.decision-diagnostics {
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  font-size: 12px;
+}
+.decision-diagnostics summary,
+.comparison-details summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.decision-diagnostics p,
+.comparison-details p {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.decision-reasons > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+}
+.decision-reasons dd {
+  font-variant-numeric: tabular-nums;
+}
+.method-proof p {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.comparison-table-wrap {
+  overflow-x: auto;
+  margin: 22px 0;
+}
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.comparison-table th,
+.comparison-table td {
+  padding: 14px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.comparison-table td {
+  font-variant-numeric: tabular-nums;
+}
+.comparison-details li {
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.comparison-details ul {
+  padding-left: 20px;
+}

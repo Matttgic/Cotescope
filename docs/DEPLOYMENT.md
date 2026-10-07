@@ -1,13 +1,13 @@
 # Publication sur Vercel
 
-La première version utilise **le flux public cotes-value** et **le journal local**. Elle n’a besoin ni de la clé PulseScore, ni de Neon, ni d’un nouveau cron. Les fichiers publiés du collecteur existant sont lus ; les secrets et la fréquence de collecte de cotes-value restent inchangés.
+La version utilise **la méthode de décision CoteScope robuste** sur **les prix publiés par cotes-value**. Le scanner et le journal local n’ont besoin ni de clé PulseScore, ni de Neon, ni d’un nouveau cron. La synchronisation Neon est disponible avec le schéma à jour. Les secrets et la fréquence de collecte de cotes-value restent inchangés.
 
 ## Projet Vercel existant
 
 1. Publier les changements de ce dépôt sur GitHub.
 2. Dans Vercel, ouvrir le projet lié à `Matttgic/Cotescope`. Vérifier que sa branche de production correspond à la branche contenant la refonte.
-3. Redéployer cette révision. `vercel.json` définit Next.js, `npm ci`, la compilation et `DEFAULT_DATA_SOURCE=cotes-value`. Node 24 est indiqué dans `package.json`.
-4. Ouvrir le site : **Cotes-value** doit être sélectionné. Si le flux est indisponible ou ancien, l’interface doit afficher une erreur ou une liste vide ; elle ne passe pas automatiquement en démo.
+3. Redéployer cette révision. `vercel.json` définit Next.js, `npm ci`, la compilation et `DEFAULT_DATA_SOURCE=cotescope`. Vérifier les éventuels réglages du projet qui peuvent surcharger ce défaut. Node 24 est indiqué dans `package.json`.
+4. Ouvrir le site : **CoteScope** doit être sélectionné. Si le flux est indisponible ou ancien, l’interface affiche une erreur ou une liste vide. **Cotes-value** reste disponible pour l’ancienne règle de sélection.
 
 ## Premier projet, y compris depuis Android
 
@@ -16,7 +16,7 @@ Ouvrir [vercel.com/new](https://vercel.com/new) dans le navigateur, connecter Gi
 ## Vérifications après publication
 
 - `/api/health` répond en HTTP 200.
-- `/api/opportunities` renvoie `source: "cotes-value"` et `demo: false` quand le fichier public est disponible. Une réponse 502 signale une erreur de source, pas une panne Neon.
+- `/api/opportunities` et `/api/cotescope` renvoient `source: "cotescope"`, `demo: false` et des diagnostics de rejet quand le fichier public est disponible. Une réponse 502 signale une erreur de source, pas une panne Neon.
 - Les cinq onglets, les images et les filtres fonctionnent sur téléphone.
 - Le bouton **Démo** donne des exemples explicitement séparés ; un rechargement retourne à la source de déploiement.
 - Une prise ajoutée au journal personnel persiste dans le même navigateur. Le journal du cloud de travail ne se transfère pas automatiquement vers le domaine Vercel : le stockage local dépend du navigateur et du domaine.

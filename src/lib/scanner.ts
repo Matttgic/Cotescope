@@ -50,7 +50,7 @@ export function filterOpportunities(
         Number.isFinite(item.opportunityScore) &&
         Number.isFinite(start) &&
         start > now &&
-        quoteAge(item, now) <= 900 &&
+        quoteAge(item, now) <= (item.method?.referenceCount === 1 ? 180 : 900) &&
         (filters.sport === "Tous" || item.sport === filters.sport) &&
         (filters.bookmaker === "Tous" ||
           item.bookmaker === filters.bookmaker) &&

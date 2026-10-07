@@ -33,12 +33,12 @@ const { chromium } = require("playwright");
     );
     // Production starts with the public real feed. A source error stays visible;
     // demo fixtures become available only after the user explicitly selects them.
-    await page.route("**/api/cotes-value", (route) =>
+    await page.route("**/api/cotescope", (route) =>
       route.fulfill({
         status: 502,
         contentType: "application/json",
         body: JSON.stringify({
-          error: "cotes_value_unavailable",
+          error: "cotescope_source_unavailable",
           demo: false,
           opportunities: [],
         }),
@@ -51,7 +51,7 @@ const { chromium } = require("playwright");
       .waitFor();
     assert.equal(
       await page
-        .getByRole("button", { name: "Cotes-value", exact: true })
+        .getByRole("button", { name: "CoteScope", exact: true })
         .getAttribute("aria-pressed"),
       "true",
     );
@@ -171,7 +171,7 @@ const { chromium } = require("playwright");
     await page.reload();
     assert.equal(
       await page
-        .getByRole("button", { name: "Cotes-value", exact: true })
+        .getByRole("button", { name: "CoteScope", exact: true })
         .getAttribute("aria-pressed"),
       "true",
     );
@@ -581,6 +581,97 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Fermer l’analyse" }).waitFor();
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("dialog[open]").count(), 0);
+    const { decideCoteScope } = loadTS("src/lib/decisionEngine.ts");
+    const own = decideCoteScope([
+      {
+        ...engineRow,
+        match_id: "own-event",
+        debut: stamp(3600000),
+        detecte: stamp(-30000),
+        lu_reference: stamp(-30000),
+        marche: "RESULTAT_1N2",
+        periode: "MATCH",
+        ligne: null,
+        issue: "DOM",
+        pari: "Paris",
+        cote: 2.3,
+        proba_juste: 0.5,
+        reference: "Pinnacle",
+        controle: { statut: "conforme", n: 1000, mediane: 0.95 },
+        score_association: 0.98,
+        match_id_reference: "own-reference",
+        match_reference: "Paris — Lyon",
+        suspect: null,
+      },
+    ]);
+    assert.equal(own.opportunities.length, 1);
+    await page.route("**/api/cotescope", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...own,
+          source: "cotescope",
+          demo: false,
+          generatedAt: stamp(0),
+        }),
+      }),
+    );
+    await page.getByRole("button", { name: "CoteScope", exact: true }).click();
+    await page.locator(".opportunity-row").first().waitFor();
+    assert.equal(await page.locator(".opportunity-row").count(), 1);
+    await page.locator(".decision-diagnostics summary").click();
+    await page.screenshot({
+      path: artifact + "/method-mobile.png",
+      fullPage: true,
+    });
+    await page.locator(".opportunity-row").first().click();
+    await page.getByText("CoteScope · robust-v1", { exact: true }).waitFor();
+    const stakeInput = page.getByRole("spinbutton", {
+      name: "Mise à enregistrer (€)",
+    });
+    await stakeInput.fill("999");
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Enregistrer ma prise", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await stakeInput.fill("1");
+    await page
+      .getByRole("button", { name: "Enregistrer ma prise", exact: true })
+      .click();
+    const proof = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("cotescope.bet-history.v1") || "[]").find(
+        (b) => b.opportunityId.startsWith("cs-"),
+      ),
+    );
+    assert.equal(proof.capture.method.version, "robust-v1");
+    assert.ok(proof.capture.method.stakeFraction <= 0.01);
+    await page.getByRole("button", { name: "Outils", exact: true }).click();
+    await page.getByRole("tab", { name: "Comparaison", exact: true }).click();
+    await page
+      .getByRole("heading", { name: "Comparer avant de conclure." })
+      .waitFor();
+    await page
+      .getByText(
+        "Échantillon insuffisant pour démontrer un meilleur rendement.",
+        { exact: true },
+      )
+      .waitFor();
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+      );
+      await page.screenshot({
+        path: artifact + "/comparison-" + width + ".png",
+        fullPage: true,
+      });
+    }
     assert.deepEqual(errors, []);
     console.log(
       "Browser checks passed: filters, explicit recording, settlement, ROI, persistence, CSV, arbitrage, settings, source errors, dialog keyboard access responsive layouts, published simulation filters, measured CLV, partial settlement arithmetic and market evidence.",

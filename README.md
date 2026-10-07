@@ -1,6 +1,6 @@
 # CoteScope
 
-Une console française pour comparer les prix, examiner l’EV et tenir un journal de prises. Interface responsive, source réelle cotes-value par défaut, calculs inspectables et suivi volontaire.
+Une console française pour comparer les prix, examiner l’EV et tenir un journal de prises. Méthode de décision CoteScope robuste par défaut, prix publiés par cotes-value, calculs inspectables et suivi volontaire. La [méthode et sa comparaison exploratoire](docs/METHOD.md) distinguent la décision de la collecte et rendent les limites mesurables.
 
 ## Démarrer
 
@@ -29,7 +29,7 @@ Next.js peut régénérer `next-env.d.ts` et ajuster `tsconfig.json` au démarra
 
 ## Sources et parcours
 
-À l’ouverture, le scanner sélectionne **Cotes-value**. `DEFAULT_DATA_SOURCE` peut être défini à `cotes-value`, `demo` ou `live` ; sans configuration, les fichiers réels sont utilisés. La page résout ce choix au démarrage de chaque requête, y compris lorsqu’un réglage change après la compilation. Une erreur de source ne produit jamais une démo implicite. L’ancien réglage `ODDS_PROVIDER` n’est plus utilisé pour choisir la source du scanner.
+À l’ouverture, le scanner sélectionne **CoteScope** : médiane pondérée des références unitaires, marge de stress et décision sur l’avantage prudent. `DEFAULT_DATA_SOURCE` peut être défini à `cotescope`, `cotes-value`, `demo` ou `live`. La page résout ce choix au démarrage de chaque requête. Une erreur de source ne produit jamais une démo implicite. L’ancien réglage `ODDS_PROVIDER` n’est plus utilisé.
 
 Pour mettre la version en ligne, suivre [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Le flux public et le journal local fonctionnent sans clé et sans Neon.
 
@@ -37,6 +37,7 @@ La navigation se compose de cinq onglets : **Scanner**, **Journal**, **Performan
 
 L’identité visuelle utilise une palette bleu nuit/violet, une couverture sportive originale, le symbole CoteScope, des pictogrammes de sports et les écussons des clubs identifiés. Les raccourcis de sports filtrent directement le scanner. Les ressources sont servies localement ; provenance et mentions dans [docs/ASSETS.md](docs/ASSETS.md).
 
+- **CoteScope** : moteur de décision distinct sur les références unitaires horodatées du flux publié. Avantage prudent ≥ 2 %, une sélection par match reconnu, marchés binaires et quart de Kelly plafonné à 1 %. Version et calculs conservés dans les preuves du journal. Aucun appel payant.
 - **Démo** : huit signaux illustratifs, sept retenus par défaut. EV calculée à partir des prix, horodatages relatifs, journal séparé. Aucune clé requise.
 - **Live** : cache des détections du moteur CoteScope. Nécessite Neon, les migrations `neon/migrations/0001_bet_history.sql` puis `neon/migrations/0002_capture_and_partial_settlement.sql`, une collecte réussie et les variables serveur de `.env.example`.
 - **Cotes-value** : lecture seule du flux publié par [Matttgic/cotes-value](https://github.com/Matttgic/cotes-value), marchés canoniques contrôlés (résultats, handicaps, totaux, doubles chances, scores exacts, mi-temps/fin et périodes), consensus prioritaire et preuves de comparaison détaillées. Aucune collecte payante déclenchée par la console.
