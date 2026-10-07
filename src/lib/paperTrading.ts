@@ -15,7 +15,7 @@ export const PAPER_POLICY = Object.freeze({
   maxOdds: 4,
   maxTrades: 5000,
 });
-export type PaperMode = "cotescope" | "cotes-value";
+export type PaperMode = "cotescope" | "cotescope-balanced" | "cotes-value";
 export type PaperState = {
   schema: "cotescope.paper.state.v1";
   mode: PaperMode;
@@ -181,7 +181,7 @@ export function openPaperTrades(
     )
       continue;
     const fraction =
-      mode === "cotescope"
+      mode !== "cotes-value"
         ? item.method?.stakeFraction
         : fractionalKelly(
             item.bookmakerOdds,

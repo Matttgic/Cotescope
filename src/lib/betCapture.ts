@@ -71,7 +71,7 @@ export function normalizeCapture(input: unknown): BetCapture | null {
     const m = c.method;
     if (
       !object(m) ||
-      m.version !== "robust-v1" ||
+      (m.version !== "robust-v1" && m.version !== "balanced-v1") ||
       !finite(m.centralProbability) ||
       !finite(m.conservativeProbability) ||
       m.centralProbability <= 0 ||
@@ -103,7 +103,7 @@ export function normalizeCapture(input: unknown): BetCapture | null {
     )
       return null;
     method = {
-      version: "robust-v1",
+      version: m.version,
       centralProbability: m.centralProbability,
       conservativeProbability: m.conservativeProbability,
       probabilityBuffer: m.probabilityBuffer,

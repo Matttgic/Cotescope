@@ -585,7 +585,7 @@ const { chromium } = require("playwright");
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("dialog[open]").count(), 0);
     const { decideCoteScope } = loadTS("src/lib/decisionEngine.ts");
-    const own = decideCoteScope([
+    const ownRows = [
       {
         ...engineRow,
         match_id: "own-event",
@@ -606,7 +606,8 @@ const { chromium } = require("playwright");
         match_reference: "Paris — Lyon",
         suspect: null,
       },
-    ]);
+    ];
+    const own = decideCoteScope(ownRows);
     assert.equal(own.opportunities.length, 1);
     await page.route("**/api/cotescope", (route) =>
       route.fulfill({
@@ -700,6 +701,15 @@ const { chromium } = require("playwright");
       paperTime,
       paperState.startedAt,
     );
+    const balancedState = { ...paperState, mode: "cotescope-balanced" };
+    const balancedLedger = openPaperTrades(
+      "cotescope-balanced",
+      decideCoteScope(ownRows, paperTime, "balanced").opportunities,
+      [],
+      paperTime,
+      balancedState.startedAt,
+    );
+    assert.equal(balancedLedger.length, 1);
     await page.route("**/api/paper", (route) =>
       route.fulfill({
         status: 200,
@@ -721,6 +731,12 @@ const { chromium } = require("playwright");
               metrics: paperMetrics([], 1000, paperTime),
               latest: [],
             },
+            {
+              mode: "cotescope-balanced",
+              state: balancedState,
+              metrics: paperMetrics(balancedLedger, 1000, paperTime),
+              latest: balancedLedger,
+            },
           ],
         }),
       }),
@@ -740,6 +756,7 @@ const { chromium } = require("playwright");
     assert.ok(
       (await page.locator(".stats-grid").innerText()).includes("1\u202f000,00"),
     );
+    assert.equal(await page.locator(".paper-mode button").count(), 3);
     for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       assert.equal(
@@ -750,6 +767,35 @@ const { chromium } = require("playwright");
       );
       await page.screenshot({
         path: artifact + "/paper-" + width + ".png",
+        fullPage: true,
+      });
+    }
+    await page
+      .getByRole("button", { name: "CoteScope équilibré", exact: true })
+      .click();
+    assert.equal(
+      await page
+        .getByRole("button", { name: "CoteScope équilibré", exact: true })
+        .getAttribute("aria-pressed"),
+      "true",
+    );
+    assert.ok(
+      (await page.getByTestId("paper-profile").innerText()).includes(
+        "divisées par deux",
+      ),
+    );
+    await page.locator(".paper-trade summary").first().click();
+    await page.getByText(/Méthode balanced-v1/).waitFor();
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+      );
+      await page.screenshot({
+        path: artifact + "/balanced-" + width + ".png",
         fullPage: true,
       });
     }
@@ -780,6 +826,12 @@ const { chromium } = require("playwright");
               metrics: paperMetrics([], 1000),
               latest: [],
             },
+            {
+              mode: "cotescope-balanced",
+              state: null,
+              metrics: paperMetrics([], 1000),
+              latest: [],
+            },
           ],
         }),
       }),
@@ -792,7 +844,7 @@ const { chromium } = require("playwright");
       .waitFor();
     assert.deepEqual(errors, []);
     console.log(
-      "Browser checks passed: filters, explicit recording, settlement, ROI, persistence, CSV, arbitrage, settings, source errors, dialog keyboard access responsive layouts, published simulation filters, measured CLV, partial settlement arithmetic and market evidence.",
+      "Browser checks passed: filters, explicit recording, settlement, ROI, persistence, CSV, arbitrage, settings, source errors, dialog keyboard access responsive layouts, published simulation filters, measured CLV, partial settlement arithmetic, market evidence and three prospective paper portfolios including balanced.",
     );
     console.log("Artifacts: " + artifact);
   } finally {

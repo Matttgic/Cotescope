@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { money, number, percent, time, statuses } from "@/lib/format";
-import type { PaperState, PaperTrade } from "@/lib/paperTrading";
+import type { PaperMode, PaperState, PaperTrade } from "@/lib/paperTrading";
 import { paperMetrics } from "@/lib/paperTrading";
 import Stat from "./Stat";
 type Portfolio = {
@@ -20,7 +20,7 @@ export default function PaperTradingView() {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [reload, setReload] = useState(0),
-    [mode, setMode] = useState("cotescope"),
+    [mode, setMode] = useState<PaperMode>("cotescope"),
     [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
@@ -66,8 +66,8 @@ export default function PaperTradingView() {
             <span className="eyebrow">TEST PROSPECTIF · ARGENT VIRTUEL</span>
             <h2>Votre bankroll se teste toute seule.</h2>
             <p>
-              Deux portefeuilles de 1 000 € virtuels. Sélection, prises Kelly et
-              règlements côté serveur, même lorsque le site est fermé.
+              Trois portefeuilles de 1 000 € virtuels. Sélection, prises Kelly
+              et règlements côté serveur, même lorsque le site est fermé.
             </p>
           </div>
           <button
@@ -124,6 +124,13 @@ export default function PaperTradingView() {
             CoteScope prudent
           </button>
           <button
+            className={mode === "cotescope-balanced" ? "active" : ""}
+            aria-pressed={mode === "cotescope-balanced"}
+            onClick={() => setMode("cotescope-balanced")}
+          >
+            CoteScope équilibré
+          </button>
+          <button
             className={mode === "cotes-value" ? "active" : ""}
             aria-pressed={mode === "cotes-value"}
             onClick={() => setMode("cotes-value")}
@@ -133,8 +140,15 @@ export default function PaperTradingView() {
         </div>
         <p className="fine-print">
           Quart de Kelly · maximum 1 % de bankroll par prise · 10 % d’exposition
-          totale · une prise par match reconnu · cotes ≤ 4. Le témoin utilise
-          les mêmes limites de risque.
+          totale · une prise par match reconnu · cotes ≤ 4. Les trois
+          portefeuilles utilisent les mêmes limites de risque.
+        </p>
+        <p className="fine-print" data-testid="paper-profile">
+          {mode === "cotescope-balanced"
+            ? "Équilibré : pénalités de prudence de base, de référence unique et d’âge divisées par deux. Le seuil d’avantage de 2 %, la pénalité de désaccord et les contrôles de qualité sont conservés."
+            : mode === "cotescope"
+              ? "Prudent : marge de sécurité complète sur les probabilités, puis au moins 2 % d’avantage théorique."
+              : "Témoin : sélections de l’adaptateur cotes-value avec les mêmes limites de mise et d’exposition."}
         </p>
       </section>
       {m && (
@@ -251,8 +265,10 @@ export default function PaperTradingView() {
             <p>
               Test prospectif depuis{" "}
               {state ? time(state.startedAt) : "le premier cycle réussi"}. Les
-              résultats proviennent du collecteur cotes-value ; les frais,
-              limites opérateurs et écarts entre prix affiché et prix réellement
+              dates de départ des portefeuilles peuvent différer ; leurs bilans
+              doivent être comparés sur une période commune. Les résultats
+              proviennent du collecteur cotes-value ; les frais, limites
+              opérateurs et écarts entre prix affiché et prix réellement
               disponible ne sont pas simulés. Les signaux non publiés par ce
               collecteur restent absents. Un petit échantillon positif ne prouve
               pas la rentabilité.

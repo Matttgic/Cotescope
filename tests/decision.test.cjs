@@ -198,3 +198,74 @@ test("solo reference expires on the client before the general 15-minute limit", 
     0,
   );
 });
+test("balanced accepts a borderline edge with a smaller stress buffer and preserves its capture version", () => {
+  const rows = [
+    row({
+      cote: 2.07,
+      detecte: new Date(now).toISOString(),
+      lu_reference: new Date(now).toISOString(),
+    }),
+  ];
+  assert.equal(decideCoteScope(rows, now).opportunities.length, 0);
+  const result = decideCoteScope(rows, now, "balanced");
+  assert.equal(result.diagnostics.version, "balanced-v1");
+  assert.equal(result.opportunities.length, 1);
+  const item = result.opportunities[0];
+  assert.equal(item.method.version, "balanced-v1");
+  assert.ok(Math.abs(item.method.conservativeProbability - 0.495) < 1e-12);
+  assert.ok(Math.abs(item.evPct - 2.465) < 1e-10);
+  assert.ok(item.method.stakeFraction <= 0.01);
+  const capture = captureOpportunity(item, new Date(now).toISOString());
+  assert.deepEqual(normalizeCapture(capture), capture);
+  assert.equal(
+    normalizeCapture({
+      ...capture,
+      method: { ...capture.method, version: "unknown-v1" },
+    }),
+    null,
+  );
+  assert.throws(
+    () => decideCoteScope(rows, now, "unknown"),
+    /invalid_decision_profile/,
+  );
+});
+test("balanced retains stale, identity, missing evidence and unsupported market rejections", () => {
+  for (const patch of [
+    { reference: "Betfair" },
+    { score_association: 0.94 },
+    { match_id_reference: null },
+    { controle: null },
+    { suspect: "wrong market" },
+    { detecte: "2026-10-07T17:56:00Z", lu_reference: "2026-10-07T17:56:00Z" },
+    { lu_reference: "2026-10-07T17:54:00Z" },
+    { debut: "2026-10-07T17:00:00Z" },
+    { marche: "DRAW_NO_BET" },
+  ])
+    assert.equal(
+      decideCoteScope([row(patch)], now, "balanced").opportunities.length,
+      0,
+      JSON.stringify(patch),
+    );
+  assert.equal(
+    decideCoteScope(
+      [row(), row({ reference: "Betfair", proba_juste: 0.35 })],
+      now,
+      "balanced",
+    ).diagnostics.rejected.disagreement,
+    1,
+  );
+});
+test("balanced keeps the median and full disagreement penalty while reducing other stress terms", () => {
+  const rows = [row(), row({ reference: "Betfair", proba_juste: 0.49 })];
+  const prudent = decideCoteScope(rows, now).opportunities[0];
+  const balanced = decideCoteScope(rows, now, "balanced").opportunities[0];
+  assert.equal(
+    prudent.method.centralProbability,
+    balanced.method.centralProbability,
+  );
+  assert.equal(prudent.method.dispersion, balanced.method.dispersion);
+  assert.ok(balanced.method.probabilityBuffer > balanced.method.dispersion / 2);
+  assert.ok(
+    balanced.method.probabilityBuffer > prudent.method.probabilityBuffer / 2,
+  );
+});

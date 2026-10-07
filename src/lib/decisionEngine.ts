@@ -3,6 +3,7 @@ import type { Opportunity, Sport } from "./types";
 import { fractionalKelly, passesHighOddsGuard } from "./value";
 
 export const METHOD_VERSION = "robust-v1";
+export const BALANCED_METHOD_VERSION = "balanced-v1";
 // Fixed stress policy. These constants are not fitted on reported profits.
 export const DECISION_POLICY = Object.freeze({
   minEdgePct: 2,
@@ -18,8 +19,15 @@ export const DECISION_POLICY = Object.freeze({
   maxOdds: 6,
   maxStakeFraction: 0.01,
 });
+export const BALANCED_POLICY = Object.freeze({
+  ...DECISION_POLICY,
+  baseProbabilityBuffer: 0.002,
+  soloProbabilityBuffer: 0.003,
+  ageProbabilityBuffer: 0.002,
+});
+export type DecisionProfile = "prudent" | "balanced";
 export type DecisionEvidence = {
-  version: typeof METHOD_VERSION;
+  version: typeof METHOD_VERSION | typeof BALANCED_METHOD_VERSION;
   centralProbability: number;
   conservativeProbability: number;
   probabilityBuffer: number;
@@ -42,7 +50,7 @@ export const REJECTION_LABELS: Record<string, string> = {
   exposure: "Une sélection mieux classée sur ce match",
 };
 export type DecisionDiagnostics = {
-  version: string;
+  version: DecisionEvidence["version"];
   inputRows: number;
   invalidRows: number;
   candidates: number;
@@ -119,11 +127,17 @@ function median(values: Array<{ p: number; weight: number }>): number {
 export function decideCoteScope(
   input: unknown,
   now = Date.now(),
+  profile: DecisionProfile = "prudent",
 ): { opportunities: Opportunity[]; diagnostics: DecisionDiagnostics } {
+  if (profile !== "prudent" && profile !== "balanced")
+    throw new Error("invalid_decision_profile");
+  const policy = profile === "balanced" ? BALANCED_POLICY : DECISION_POLICY;
+  const version =
+    profile === "balanced" ? BALANCED_METHOD_VERSION : METHOD_VERSION;
   if (!Array.isArray(input) || !Number.isFinite(now))
     throw new Error("invalid_feed");
   const diagnostics: DecisionDiagnostics = {
-    version: METHOD_VERSION,
+    version,
     inputRows: input.length,
     invalidRows: 0,
     candidates: 0,
@@ -176,7 +190,7 @@ export function decideCoteScope(
     if (
       start <= now ||
       quoteTime > now + 60000 ||
-      now - quoteTime > DECISION_POLICY.maxAgeSeconds * 1000
+      now - quoteTime > policy.maxAgeSeconds * 1000
     ) {
       reject("stale");
       continue;
@@ -205,7 +219,7 @@ export function decideCoteScope(
         !text(r.match_id_reference) ||
         !text(r.match_reference) ||
         !finite(r.score_association) ||
-        r.score_association < DECISION_POLICY.minAssociation ||
+        r.score_association < policy.minAssociation ||
         stamp(r.debut) !== start
       ) {
         identityFailure = true;
@@ -218,9 +232,8 @@ export function decideCoteScope(
         Math.abs(detected - quoteTime) > 2000 ||
         r.cote !== odds ||
         readTime > now + 60000 ||
-        Math.abs(readTime - quoteTime) >
-          DECISION_POLICY.maxTimeSkewSeconds * 1000 ||
-        now - readTime > DECISION_POLICY.maxAgeSeconds * 1000
+        Math.abs(readTime - quoteTime) > policy.maxTimeSkewSeconds * 1000 ||
+        now - readTime > policy.maxAgeSeconds * 1000
       ) {
         staleFailure = true;
         continue;
@@ -245,13 +258,12 @@ export function decideCoteScope(
     if (
       solo &&
       (!references.has("Pinnacle") ||
-        Number(refs[0][1].score_association) <
-          DECISION_POLICY.soloMinAssociation)
+        Number(refs[0][1].score_association) < policy.soloMinAssociation)
     ) {
       reject("reference");
       continue;
     }
-    if (solo && age > DECISION_POLICY.soloMaxAgeSeconds) {
+    if (solo && age > policy.soloMaxAgeSeconds) {
       reject("stale");
       continue;
     }
@@ -263,7 +275,7 @@ export function decideCoteScope(
       max = Math.max(...probabilities.map((x) => x.p));
     const dispersion = max - min;
     if (
-      dispersion > DECISION_POLICY.maxProbabilitySpread + 1e-12 ||
+      dispersion > policy.maxProbabilitySpread + 1e-12 ||
       max / min > 1.25 + 1e-12
     ) {
       reject("disagreement");
@@ -271,17 +283,16 @@ export function decideCoteScope(
     }
     const centralProbability = median(probabilities);
     const probabilityBuffer =
-      DECISION_POLICY.baseProbabilityBuffer +
+      policy.baseProbabilityBuffer +
       dispersion / 2 +
-      (solo ? DECISION_POLICY.soloProbabilityBuffer : 0) +
-      (DECISION_POLICY.ageProbabilityBuffer * age) /
-        DECISION_POLICY.maxAgeSeconds;
+      (solo ? policy.soloProbabilityBuffer : 0) +
+      (policy.ageProbabilityBuffer * age) / policy.maxAgeSeconds;
     const conservativeProbability = Math.max(
       0,
       centralProbability - probabilityBuffer,
     );
     const edge = (odds * conservativeProbability - 1) * 100;
-    if (edge < DECISION_POLICY.minEdgePct || edge > 25) {
+    if (edge < policy.minEdgePct || edge > 25) {
       reject("edge");
       continue;
     }
@@ -295,7 +306,7 @@ export function decideCoteScope(
       ),
     );
     if (
-      odds > DECISION_POLICY.maxOdds ||
+      odds > policy.maxOdds ||
       (odds > 4 &&
         (solo || edge < 5 || !passesHighOddsGuard(odds, score, edge)))
     ) {
@@ -304,7 +315,7 @@ export function decideCoteScope(
     }
     const base = references.get("Pinnacle") || refs[0][1];
     const method: DecisionEvidence = {
-      version: METHOD_VERSION,
+      version,
       centralProbability,
       conservativeProbability,
       probabilityBuffer,
@@ -316,7 +327,7 @@ export function decideCoteScope(
         odds,
         conservativeProbability,
         0.25,
-        DECISION_POLICY.maxStakeFraction,
+        policy.maxStakeFraction,
       ),
       eventKey: eventKey(latest),
     };
@@ -339,7 +350,8 @@ export function decideCoteScope(
       confidence: score >= 85 ? "Forte" : "Moyenne",
       highOddsGuard: passesHighOddsGuard(odds, score, edge),
       isBoost: false,
-      reference: "CoteScope robuste",
+      reference:
+        profile === "balanced" ? "CoteScope équilibré" : "CoteScope robuste",
       observedAt: new Date(oldest).toISOString(),
       references: refs.map(([name, r]) => ({
         name,
@@ -368,7 +380,7 @@ export function decideCoteScope(
           fairOdds: 1 / Number(r.proba_juste),
         })),
       },
-      qualityNote: `CoteScope ${METHOD_VERSION} : médiane pondérée de ${refs.length} référence(s) unitaire(s), puis retrait de ${(probabilityBuffer * 100).toFixed(2)} points de probabilité pour tester l'incertitude. Avantage prudent ${edge.toFixed(2)} %. Une sélection par match reconnu ; quart de Kelly plafonné à 1 %. Politique heuristique, sans intervalle de confiance statistique. Prix issus de cotes-value ; couverture présélectionnée.`,
+      qualityNote: `CoteScope ${version} : médiane pondérée de ${refs.length} référence(s) unitaire(s), puis retrait de ${(probabilityBuffer * 100).toFixed(2)} points de probabilité pour tester l'incertitude. Avantage prudent ${edge.toFixed(2)} %. Une sélection par match reconnu ; quart de Kelly plafonné à 1 %. Politique heuristique, sans intervalle de confiance statistique. Prix issus de cotes-value ; couverture présélectionnée.`,
     });
   }
   // Deterministic best candidate per identified event; avoid stacking related markets and books.

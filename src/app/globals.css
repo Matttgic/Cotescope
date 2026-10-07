@@ -3141,6 +3141,13 @@ input {
 }
 .paper-mode {
   margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+.paper-mode button {
+  min-width: 0;
+  white-space: normal;
 }
 .paper-trade {
   border-top: 1px solid var(--line);

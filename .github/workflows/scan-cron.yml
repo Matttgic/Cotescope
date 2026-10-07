@@ -7,6 +7,8 @@ on:
       - ".github/workflows/scan-cron.yml"
       - "src/lib/paperTrading.ts"
       - "src/lib/paperStore.ts"
+      - "src/lib/decisionEngine.ts"
+      - "src/lib/betCapture.ts"
       - "src/app/api/cron/paper/**"
   schedule:
     - cron: "2-59/5 * * * *"
@@ -27,7 +29,8 @@ jobs:
       - name: Wait for the paper deployment
         run: |
           for attempt in $(seq 1 18); do
-            if curl --fail --silent --show-error --max-time 10 https://cotescope.vercel.app/api/paper > /dev/null; then
+            if curl --fail --silent --show-error --max-time 10 https://cotescope.vercel.app/api/paper > /tmp/cotescope-paper.json && \
+              python3 -c 'import json; d=json.load(open("/tmp/cotescope-paper.json")); assert any(p["mode"] == "cotescope-balanced" for p in d["portfolios"])'; then
               exit 0
             fi
             sleep 10

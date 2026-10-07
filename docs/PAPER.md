@@ -1,8 +1,28 @@
 # Test automatique prospectif
 
-**Performance → Test automatique** suit deux portefeuilles indépendants de **1 000 € virtuels** : CoteScope prudent et un témoin utilisant les sélections de l’adaptateur cotes-value avec les mêmes limites de risque. Ce témoin ne reproduit pas toutes les tranches et mises du simulateur Python original.
+**Performance → Test automatique** suit trois portefeuilles indépendants de **1 000 € virtuels** : **CoteScope prudent**, **CoteScope équilibré** et un **témoin cotes-value** utilisant les sélections de l’adaptateur avec les mêmes limites de risque. Ce témoin ne reproduit pas toutes les tranches et mises du simulateur Python original.
 
 La campagne `paper-v1` commence au premier cycle serveur réussi. Elle ne reprend aucun pari historique. Les sélections, mises, prix d’entrée et résultats sont conservés dans Neon ; le navigateur ne fait que lire le bilan. Le test continue lorsque le site est fermé. Aucune transaction chez un bookmaker n’est effectuée.
+
+L’équilibré possède un propriétaire système et un démarrage distincts. Son ajout ne réinitialise ni la bankroll, ni les captures, ni la date de départ des campagnes existantes. Pour comparer des résultats, utiliser une période commune : les bilans cumulés depuis des dates différentes ne constituent pas une comparaison équitable.
+
+## Prudent et équilibré
+
+Les deux profils utilisent la même médiane pondérée et les mêmes contrôles de données. `robust-v1` est le profil prudent du scanner par défaut ; `balanced-v1` est utilisé par le nouveau portefeuille automatique. Les constantes sont des hypothèses de test, pas des paramètres calibrés sur les profits.
+
+| Paramètre                                                    | Prudent                            | Équilibré                 |
+| ------------------------------------------------------------ | ---------------------------------- | ------------------------- |
+| Retrait de probabilité de base                               | 0,4 point                          | 0,2 point                 |
+| Retrait supplémentaire avec Pinnacle seul                    | 0,6 point                          | 0,3 point                 |
+| Pénalité d’âge                                               | `0,4 point × âge / 900 s`          | `0,2 point × âge / 900 s` |
+| Pénalité de désaccord                                        | Moitié de l’écart entre références | Identique                 |
+| Avantage théorique minimal après retrait                     | 2 %                                | 2 %                       |
+| Fraîcheur, correspondance, références et marchés admissibles | Contrôles prudents                 | Identiques                |
+| Limites Kelly et exposition                                  | Règles ci-dessous                  | Identiques                |
+
+Exemple avec Pinnacle seul et des relevés tout frais : une estimation de 50 % devient 49 % en prudent et 49,5 % en équilibré. À la cote 2,07, l’avantage prudent est 1,43 % (rejeté), celui de l’équilibré 2,465 % (admissible sous les autres contrôles). Sur 1 000 €, le quart de Kelly équilibré propose alors une mise de 5,75 €. Les contrôles de référence peuvent encore produire zéro prise dans les deux profils, même avec un tampon réduit.
+
+Chaque nouvelle capture conserve la version du profil, la probabilité centrale, le retrait appliqué, la probabilité utilisée et la fraction Kelly. Les versions antérieures restent compatibles.
 
 ## Mises
 
@@ -22,7 +42,7 @@ Le statut sportif provient donc du collecteur existant, sans vérification indé
 
 La bankroll comptable vaut 1 000 € plus le profit net réalisé ; le cash libre soustrait les mises encore réservées. Le ROI utilise toutes les mises réglées, remboursements compris. Le rendement de bankroll utilise les 1 000 € initiaux. La courbe et le drawdown réalisé suivent l’heure à laquelle le serveur reconnaît les règlements ; ceux d’un même cycle sont comptabilisés ensemble. Aucun prix de marché intermédiaire ne valorise les paris ouverts.
 
-Les deux portefeuilles disposent d’un journal complet côté base ; l’interface affiche les 50 dernières prises. La campagne accepte au maximum 5 000 prises par portefeuille, puis cesse d’en ouvrir. Les captures de prix restent immuables. Les propriétaires système sont distincts du journal personnel et des anciennes détections Live. Aucune migration supplémentaire au-delà de `0001` et `0002` n’est nécessaire.
+Les trois portefeuilles disposent d’un journal complet côté base ; l’interface affiche les 50 dernières prises. La campagne accepte au maximum 5 000 prises par portefeuille, puis cesse d’en ouvrir. Les captures de prix restent immuables. Les propriétaires système sont distincts du journal personnel et des anciennes détections Live. Aucune migration supplémentaire au-delà de `0001` et `0002` n’est nécessaire.
 
 ## Planification et contrôle
 

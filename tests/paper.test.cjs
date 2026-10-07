@@ -242,8 +242,9 @@ test("Postgres paper cycles are prospective, idempotent, isolated and financiall
       ),
     );
     const first = await store.runPaperCycle([row()], [], now);
-    assert.equal(first.portfolios.length, 2);
+    assert.equal(first.portfolios.length, 3);
     assert.equal(first.portfolios[0].opened, 1);
+    assert.equal(first.portfolios[2].opened, 1);
     const again = await store.runPaperCycle([row()], [], now + 61000);
     assert.equal(again.portfolios[0].opened, 0);
     const later = Date.parse("2026-10-07T22:00:00Z");
@@ -259,7 +260,12 @@ test("Postgres paper cycles are prospective, idempotent, isolated and financiall
     const rows = await query(
       "SELECT DISTINCT owner_hash FROM public.bet_history",
     );
-    assert.equal(rows.rows.length, 2);
+    assert.equal(rows.rows.length, 3);
+    assert.equal(
+      dashboard.portfolios[2].latest[0].price.method.version,
+      "balanced-v1",
+    );
+    assert.equal(dashboard.portfolios[2].metrics.equity, 1013);
     assert.equal(
       (
         await query(
@@ -270,6 +276,88 @@ test("Postgres paper cycles are prospective, idempotent, isolated and financiall
     );
     const cooldown = await store.runPaperCycle([], [], later + 1000);
     assert.equal(cooldown.portfolios[0].skipped, "cooldown");
+  } finally {
+    await db.close();
+  }
+});
+test("adding balanced preserves existing campaigns and starts an isolated prospective bankroll", async () => {
+  const db = new PGlite();
+  const query = async (sql, args = []) => {
+    const r = await db.query(sql, args);
+    return { rows: r.rows, rowCount: r.affectedRows };
+  };
+  const store = loadTS("src/lib/paperStore.ts", {
+    "./db": {
+      getDbPool: () => ({
+        query,
+        connect: async () => ({ query, release() {} }),
+      }),
+    },
+  });
+  try {
+    for (const migration of [
+      "0001_bet_history.sql",
+      "0002_capture_and_partial_settlement.sql",
+    ])
+      await db.exec(fs.readFileSync("neon/migrations/" + migration, "utf8"));
+    const previousStart = new Date(now - 3600000).toISOString();
+    const previousTrades = new Map();
+    for (const mode of ["cotescope", "cotes-value"]) {
+      const state = {
+        ...p.newPaperState(mode, now - 3600000),
+        cycleCount: 8,
+        lastCycleAt: new Date(now).toISOString(),
+      };
+      const items =
+        mode === "cotescope"
+          ? [item()]
+          : adaptCotesValue([row()], now).opportunities;
+      const trade = p.openPaperTrades(mode, items, [], now, previousStart)[0];
+      previousTrades.set(mode, trade);
+      for (const [suffix, opportunity, capture] of [
+        ["state", "__system_paper_state__", state],
+        ["trade", "__system_paper_trade__:" + trade.key, trade],
+      ])
+        await query(
+          "INSERT INTO bet_history(id,owner_hash,opportunity_id,sport,event,market,selection,bookmaker,odds,stake,capture) VALUES($1,$2,$3,'Football','A — B','Résultat','A','Winamax',2.3,$4,$5::jsonb)",
+          [
+            mode + "-" + suffix,
+            store.paperOwner(mode),
+            opportunity,
+            suffix === "trade" ? trade.stake : 0,
+            JSON.stringify(capture),
+          ],
+        );
+    }
+    const launchedAt = now + 61000;
+    await store.runPaperCycle([row()], [], launchedAt);
+    const dashboard = await store.readPaperDashboard(launchedAt);
+    for (const mode of ["cotescope", "cotes-value"]) {
+      const portfolio = dashboard.portfolios.find((p) => p.mode === mode);
+      assert.equal(portfolio.state.startedAt, previousStart);
+      assert.equal(portfolio.state.cycleCount, 9);
+      assert.equal(portfolio.metrics.trades, 1);
+      assert.deepEqual(portfolio.latest[0], previousTrades.get(mode));
+    }
+    const balanced = dashboard.portfolios.find(
+      (p) => p.mode === "cotescope-balanced",
+    );
+    assert.equal(balanced.state.startedAt, new Date(launchedAt).toISOString());
+    assert.equal(balanced.state.cycleCount, 1);
+    assert.equal(balanced.metrics.equity, 1000);
+    assert.equal(balanced.metrics.trades, 1);
+    assert.equal(balanced.latest[0].price.method.version, "balanced-v1");
+    assert.equal(balanced.latest[0].createdAt, balanced.state.startedAt);
+    assert.equal(balanced.metrics.cashAvailable, 990);
+    const fresh = row({
+      detecte: new Date(launchedAt + 61000).toISOString(),
+      lu_reference: new Date(launchedAt + 61000).toISOString(),
+    });
+    const again = await store.runPaperCycle([fresh], [], launchedAt + 61000);
+    assert.equal(
+      again.portfolios.find((p) => p.mode === "cotescope-balanced").opened,
+      0,
+    );
   } finally {
     await db.close();
   }

@@ -15,7 +15,8 @@ import {
 import { decideCoteScope } from "./decisionEngine";
 import { adaptCotesValue } from "./cotesValue";
 
-const MODES: PaperMode[] = ["cotescope", "cotes-value"];
+// Keep the original lock order and owner hashes; the new campaign starts separately.
+const MODES: PaperMode[] = ["cotescope", "cotes-value", "cotescope-balanced"];
 const STATE = "__system_paper_state__";
 const PREFIX = "__system_paper_trade__:";
 export const paperOwner = (mode: PaperMode) =>
@@ -83,7 +84,7 @@ export async function readPaperDashboard(now = Date.now()) {
   }
   return { version: PAPER_VERSION, policy: PAPER_POLICY, portfolios };
 }
-/** One database transaction locks both campaign markers before touching the ledger. */
+/** One database transaction serializes campaign writes using a fixed lock order. */
 export async function runPaperCycle(
   feed: unknown,
   history: unknown,
@@ -143,9 +144,13 @@ export async function runPaperCycle(
           ],
         );
       const decision =
-        mode === "cotescope"
-          ? decideCoteScope(feed, now)
-          : adaptCotesValue(feed, now);
+        mode === "cotes-value"
+          ? adaptCotesValue(feed, now)
+          : decideCoteScope(
+              feed,
+              now,
+              mode === "cotescope-balanced" ? "balanced" : "prudent",
+            );
       const opened = openPaperTrades(
         mode,
         decision.opportunities,
