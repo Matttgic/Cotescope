@@ -8,3 +8,6 @@ node_modules
 *.log
 
 *.tsbuildinfo
+
+# Local provider diagnostics (never keys or raw API responses)
+.local/

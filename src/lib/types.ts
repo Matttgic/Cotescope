@@ -1,3 +1,4 @@
+import type { MarketIdentity } from "./markets";
 export type Sport =
   | "Football"
   | "Tennis"
@@ -33,4 +34,20 @@ export type Opportunity = {
   confidence: "Forte" | "Moyenne" | "Faible";
   highOddsGuard: boolean;
   isBoost: boolean;
+  marketIdentity?: MarketIdentity;
+  evidence?: {
+    detectedAt: string;
+    referenceReadAt: string;
+    referenceEvent: string;
+    referenceId: string;
+    inverted: boolean | null;
+    association: number | null;
+    controlCount: number | null;
+    controlMedian: number | null;
+    components: Array<{ name: string; fairOdds: number }>;
+  };
+  reference?: string;
+  observedAt?: string;
+  qualityNote?: string;
+  references?: Array<{ name: string; fairOdds: number; observedAt: string }>;
 };

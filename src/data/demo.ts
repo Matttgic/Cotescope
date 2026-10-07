@@ -1,4 +1,162 @@
 import type { Opportunity } from "@/lib/types";
+import { expectedValuePct, passesHighOddsGuard } from "@/lib/value";
+
+// Illustrations only: timestamps are relative, prices are not market observations.
+export function demoOpportunities(now = Date.now()): Opportunity[] {
+  const fixtures: Array<
+    [
+      string,
+      Opportunity["sport"],
+      string,
+      string,
+      string,
+      string,
+      number,
+      number,
+      number,
+      number,
+    ]
+  > = [
+    [
+      "1",
+      "Football",
+      "Ligue 1",
+      "Monaco — Lille",
+      "Monaco",
+      "Winamax",
+      2.22,
+      2.11,
+      88,
+      42,
+    ],
+    [
+      "2",
+      "Tennis",
+      "ATP · Simple messieurs",
+      "Alcaraz — Sinner",
+      "Sinner",
+      "Betclic",
+      2.15,
+      2.02,
+      86,
+      28,
+    ],
+    [
+      "3",
+      "Basketball",
+      "EuroLeague",
+      "Paris — Milan",
+      "Paris",
+      "Unibet",
+      2.05,
+      1.97,
+      84,
+      63,
+    ],
+    [
+      "4",
+      "Football",
+      "Premier League",
+      "Arsenal — Brighton",
+      "Arsenal",
+      "PMU",
+      1.72,
+      1.65,
+      82,
+      75,
+    ],
+    [
+      "5",
+      "Tennis",
+      "WTA · Simple dames",
+      "Sabalenka — Gauff",
+      "Gauff",
+      "Winamax",
+      2.8,
+      2.62,
+      89,
+      36,
+    ],
+    [
+      "6",
+      "Football",
+      "Liga",
+      "Valence — Villarreal",
+      "Valence",
+      "PMU",
+      5.8,
+      4.7,
+      69,
+      177,
+    ],
+    [
+      "7",
+      "Basketball",
+      "NBA",
+      "Boston — New York",
+      "Boston",
+      "Betclic",
+      1.85,
+      1.8,
+      78,
+      104,
+    ],
+    [
+      "8",
+      "Football",
+      "Serie A",
+      "Inter — Atalanta",
+      "Inter",
+      "Unibet",
+      1.98,
+      1.9,
+      83,
+      51,
+    ],
+  ];
+  return fixtures.map(
+    (
+      [
+        id,
+        sport,
+        competition,
+        event,
+        selection,
+        bookmaker,
+        odds,
+        fair,
+        score,
+        age,
+      ],
+      index,
+    ) => {
+      const ev = expectedValuePct(odds, 1 / fair);
+      return {
+        id: `demo-${id}`,
+        sport,
+        competition,
+        event,
+        selection,
+        bookmaker,
+        startTime: new Date(now + (index + 2) * 3600000).toISOString(),
+        market: sport === "Football" ? "Résultat · 1X2" : "Vainqueur du match",
+        bookmakerOdds: odds,
+        referenceOdds: Number((fair * 0.97).toFixed(2)),
+        fairOdds: fair,
+        evPct: ev,
+        opportunityScore: score,
+        freshnessSeconds: age,
+        confidence: score >= 85 ? "Forte" : score >= 70 ? "Moyenne" : "Faible",
+        highOddsGuard: passesHighOddsGuard(odds, score, ev),
+        isBoost: false,
+        reference: "Pinnacle",
+        observedAt: new Date(now - age * 1000).toISOString(),
+        qualityNote:
+          "Exemple simulé : prix et score illustratifs, aucun relevé live.",
+      };
+    },
+  );
+}
 
 export const DEMO_OPPORTUNITIES: Opportunity[] = [
   {
@@ -18,7 +176,7 @@ export const DEMO_OPPORTUNITIES: Opportunity[] = [
     freshnessSeconds: 42,
     confidence: "Forte",
     highOddsGuard: true,
-    isBoost: false
+    isBoost: false,
   },
   {
     id: "demo-2",
@@ -37,7 +195,7 @@ export const DEMO_OPPORTUNITIES: Opportunity[] = [
     freshnessSeconds: 28,
     confidence: "Forte",
     highOddsGuard: true,
-    isBoost: false
+    isBoost: false,
   },
   {
     id: "demo-3",
@@ -56,7 +214,7 @@ export const DEMO_OPPORTUNITIES: Opportunity[] = [
     freshnessSeconds: 63,
     confidence: "Forte",
     highOddsGuard: true,
-    isBoost: true
+    isBoost: true,
   },
   {
     id: "demo-4",
@@ -75,8 +233,8 @@ export const DEMO_OPPORTUNITIES: Opportunity[] = [
     freshnessSeconds: 177,
     confidence: "Faible",
     highOddsGuard: false,
-    isBoost: false
-  }
+    isBoost: false,
+  },
 ];
 
 export const DEMO_ARBITRAGES = [
@@ -87,9 +245,9 @@ export const DEMO_ARBITRAGES = [
     market: "Vainqueur",
     outcomes: [
       { selection: "Joueur C", bookmaker: "Winamax", odds: 2.12 },
-      { selection: "Joueur D", bookmaker: "Bet365", odds: 2.02 }
+      { selection: "Joueur D", bookmaker: "Bet365", odds: 2.02 },
     ],
-    freshnessSeconds: 31
+    freshnessSeconds: 31,
   },
   {
     id: "arb-2",
@@ -98,16 +256,61 @@ export const DEMO_ARBITRAGES = [
     market: "Moneyline",
     outcomes: [
       { selection: "ASVEL", bookmaker: "Betclic", odds: 2.36 },
-      { selection: "Monaco", bookmaker: "Unibet", odds: 1.84 }
+      { selection: "Monaco", bookmaker: "Unibet", odds: 1.84 },
     ],
-    freshnessSeconds: 74
-  }
+    freshnessSeconds: 74,
+  },
 ];
 
 export const DEMO_HISTORY = [
-  { id: "h1", sport: "Football", bookmaker: "Winamax", odds: 1.92, stake: 10, result: "win", profit: 9.2, clvPct: 3.1 },
-  { id: "h2", sport: "Tennis", bookmaker: "Betclic", odds: 2.05, stake: 10, result: "loss", profit: -10, clvPct: 1.4 },
-  { id: "h3", sport: "Basketball", bookmaker: "Unibet", odds: 1.87, stake: 10, result: "win", profit: 8.7, clvPct: 2.8 },
-  { id: "h4", sport: "Football", bookmaker: "PMU", odds: 2.21, stake: 10, result: "win", profit: 12.1, clvPct: 4.3 },
-  { id: "h5", sport: "Tennis", bookmaker: "Bet365", odds: 1.78, stake: 10, result: "loss", profit: -10, clvPct: -0.7 }
+  {
+    id: "h1",
+    sport: "Football",
+    bookmaker: "Winamax",
+    odds: 1.92,
+    stake: 10,
+    result: "win",
+    profit: 9.2,
+    clvPct: 3.1,
+  },
+  {
+    id: "h2",
+    sport: "Tennis",
+    bookmaker: "Betclic",
+    odds: 2.05,
+    stake: 10,
+    result: "loss",
+    profit: -10,
+    clvPct: 1.4,
+  },
+  {
+    id: "h3",
+    sport: "Basketball",
+    bookmaker: "Unibet",
+    odds: 1.87,
+    stake: 10,
+    result: "win",
+    profit: 8.7,
+    clvPct: 2.8,
+  },
+  {
+    id: "h4",
+    sport: "Football",
+    bookmaker: "PMU",
+    odds: 2.21,
+    stake: 10,
+    result: "win",
+    profit: 12.1,
+    clvPct: 4.3,
+  },
+  {
+    id: "h5",
+    sport: "Tennis",
+    bookmaker: "Bet365",
+    odds: 1.78,
+    stake: 10,
+    result: "loss",
+    profit: -10,
+    clvPct: -0.7,
+  },
 ];

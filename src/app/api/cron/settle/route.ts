@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDbPool } from "@/lib/db";
-import { fetchRecentScores, type CompletedScoreEvent } from "@/lib/providers/theOddsApiScores";
+import {
+  fetchRecentScores,
+  type CompletedScoreEvent,
+} from "@/lib/providers/theOddsApiScores";
 import {
   MONTHLY_AUTOMATION_HARD_CAP,
   automationBudgetRatio,
@@ -32,7 +35,9 @@ type QuotaState = {
 const MIN_AFTER_START_MS = 30 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-function parseOpportunityId(opportunityId: string): Omit<OpenDetection, "selection" | "event"> | null {
+function parseOpportunityId(
+  opportunityId: string,
+): Omit<OpenDetection, "selection" | "event"> | null {
   const parts = opportunityId.split("|");
   if (parts.length !== 8 || parts[0] !== "v2") return null;
 
@@ -43,7 +48,8 @@ function parseOpportunityId(opportunityId: string): Omit<OpenDetection, "selecti
 
   if (!providerEventId || !/^[a-z0-9_]+$/.test(sportKey)) return null;
   if (!Number.isFinite(startUnix) || startUnix <= 0) return null;
-  if (!Number.isInteger(outcomeCount) || outcomeCount < 2 || outcomeCount > 4) return null;
+  if (!Number.isInteger(outcomeCount) || outcomeCount < 2 || outcomeCount > 4)
+    return null;
 
   return { opportunityId, providerEventId, sportKey, startUnix, outcomeCount };
 }
@@ -55,8 +61,16 @@ function numericScore(event: CompletedScoreEvent, team: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function settleH2H(detection: OpenDetection, result: CompletedScoreEvent): BetStatus | null {
-  if (!result.completed || !Array.isArray(result.scores) || result.scores.length < 2) return null;
+function settleH2H(
+  detection: OpenDetection,
+  result: CompletedScoreEvent,
+): BetStatus | null {
+  if (
+    !result.completed ||
+    !Array.isArray(result.scores) ||
+    result.scores.length < 2
+  )
+    return null;
 
   const homeScore = numericScore(result, result.home_team);
   const awayScore = numericScore(result, result.away_team);
@@ -113,7 +127,9 @@ async function readLastSettlementAt() {
       LIMIT 1`,
     [SERVER_DETECTION_OWNER_HASH, SYSTEM_SETTLEMENT_OPPORTUNITY_ID],
   );
-  return result.rows.length > 0 ? Date.parse(String(result.rows[0].updated_at)) || 0 : 0;
+  return result.rows.length > 0
+    ? Date.parse(String(result.rows[0].updated_at)) || 0
+    : 0;
 }
 
 async function markSettlementRun(checked: number, settled: number) {
@@ -130,11 +146,20 @@ async function markSettlementRun(checked: number, settled: number) {
        updated_at = EXCLUDED.updated_at,
        stake = EXCLUDED.stake,
        initial_ev_pct = EXCLUDED.initial_ev_pct`,
-    [SERVER_DETECTION_OWNER_HASH, SYSTEM_SETTLEMENT_OPPORTUNITY_ID, now, settled, checked],
+    [
+      SERVER_DETECTION_OWNER_HASH,
+      SYSTEM_SETTLEMENT_OPPORTUNITY_ID,
+      now,
+      settled,
+      checked,
+    ],
   );
 }
 
-async function updateQuotaState(quota: { used: number | null; remaining: number | null }) {
+async function updateQuotaState(quota: {
+  used: number | null;
+  remaining: number | null;
+}) {
   if (quota.used == null || quota.remaining == null) return;
   const pool = getDbPool();
   if (!pool) return;
@@ -151,22 +176,38 @@ async function updateQuotaState(quota: { used: number | null; remaining: number 
        stake = EXCLUDED.stake,
        initial_ev_pct = EXCLUDED.initial_ev_pct,
        opportunity_score = EXCLUDED.opportunity_score`,
-    [SERVER_DETECTION_OWNER_HASH, SYSTEM_QUOTA_OPPORTUNITY_ID, now, quota.remaining, quota.used, quotaPct],
+    [
+      SERVER_DETECTION_OWNER_HASH,
+      SYSTEM_QUOTA_OPPORTUNITY_ID,
+      now,
+      quota.remaining,
+      quota.used,
+      quotaPct,
+    ],
   );
 }
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
-    return NextResponse.json({ ok: false, error: "cron_secret_not_configured" }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, error: "cron_secret_not_configured" },
+      { status: 503 },
+    );
   }
   if (request.headers.get("authorization") !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "unauthorized" },
+      { status: 401 },
+    );
   }
 
   const pool = getDbPool();
   if (!pool) {
-    return NextResponse.json({ ok: false, error: "database_not_configured" }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, error: "database_not_configured" },
+      { status: 503 },
+    );
   }
 
   const quota = await readQuotaState();
@@ -184,7 +225,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       skipped: "settlement_interval",
-      retryAfterSeconds: Math.max(1, Math.ceil((interval - (Date.now() - lastSettlementAt)) / 1000)),
+      retryAfterSeconds: Math.max(
+        1,
+        Math.ceil((interval - (Date.now() - lastSettlementAt)) / 1000),
+      ),
     });
   }
 
@@ -193,9 +237,11 @@ export async function GET(request: NextRequest) {
             opportunity_id, selection, event
        FROM public.bet_history
       WHERE status = 'open'
+        AND owner_hash = $1
         AND opportunity_id LIKE 'v2|%'
       ORDER BY opportunity_id, updated_at DESC
       LIMIT 1000`,
+    [SERVER_DETECTION_OWNER_HASH],
   );
 
   const due: OpenDetection[] = [];
@@ -212,7 +258,12 @@ export async function GET(request: NextRequest) {
   }
 
   if (due.length === 0) {
-    return NextResponse.json({ ok: true, checked: 0, settled: 0, skipped: "no_due_open_bets" });
+    return NextResponse.json({
+      ok: true,
+      checked: 0,
+      settled: 0,
+      skipped: "no_due_open_bets",
+    });
   }
 
   const bySport = new Map<string, OpenDetection[]>();
@@ -243,7 +294,9 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      const resultById = new Map(scores.events.map((event) => [event.id, event]));
+      const resultById = new Map(
+        scores.events.map((event) => [event.id, event]),
+      );
       for (const detection of detections) {
         checked += 1;
         const result = resultById.get(detection.providerEventId);
@@ -255,8 +308,14 @@ export async function GET(request: NextRequest) {
           `UPDATE public.bet_history
               SET status = $1, updated_at = $2
             WHERE opportunity_id = $3
-              AND status = 'open'`,
-          [status, new Date().toISOString(), detection.opportunityId],
+              AND status = 'open'
+              AND owner_hash = $4`,
+          [
+            status,
+            new Date().toISOString(),
+            detection.opportunityId,
+            SERVER_DETECTION_OWNER_HASH,
+          ],
         );
         if ((update.rowCount ?? 0) > 0) {
           settled += 1;
@@ -266,7 +325,9 @@ export async function GET(request: NextRequest) {
         }
       }
     } catch (error) {
-      errors.push(`${sportKey}: ${error instanceof Error ? error.message : "score_error"}`);
+      errors.push(
+        `${sportKey}: ${error instanceof Error ? error.message : "score_error"}`,
+      );
     }
   }
 

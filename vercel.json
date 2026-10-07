@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci --no-audit --no-fund",
+  "buildCommand": "npm run build",
+  "env": {
+    "DEFAULT_DATA_SOURCE": "cotes-value"
+  },
+  "functions": {
+    "src/app/api/cotes-value/route.ts": { "maxDuration": 20 },
+    "src/app/api/cotes-value/history/route.ts": { "maxDuration": 20 },
+    "src/app/api/opportunities/route.ts": { "maxDuration": 20 }
+  }
+}

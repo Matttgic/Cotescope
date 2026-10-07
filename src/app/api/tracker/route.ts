@@ -1,9 +1,17 @@
+import { normalizeCapture, type BetCapture } from "@/lib/betCapture";
+import { needsTrackerUpgrade } from "@/lib/trackerSchema";
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getDbPool } from "@/lib/db";
-import { SERVER_DETECTION_OWNER_HASH } from "@/lib/serverTracker";
 
-const VALID_STATUSES = new Set(["open", "win", "loss", "void"]);
+const VALID_STATUSES = new Set([
+  "open",
+  "win",
+  "loss",
+  "void",
+  "half_win",
+  "half_loss",
+]);
 const KEY_PATTERN = /^[a-f0-9]{64}$/i;
 const SYSTEM_PREFIX = "__system_";
 
@@ -22,7 +30,8 @@ type ApiBet = {
   stake: number;
   initialEvPct: number;
   opportunityScore: number;
-  status: "open" | "win" | "loss" | "void";
+  status: "open" | "win" | "loss" | "void" | "half_win" | "half_loss";
+  capture?: BetCapture;
 };
 
 function ownerHash(request: NextRequest) {
@@ -39,9 +48,19 @@ function toFiniteNumber(value: unknown, fallback = 0) {
 function normalizeBet(value: unknown): ApiBet | null {
   if (!value || typeof value !== "object") return null;
   const bet = value as Record<string, unknown>;
+  if (
+    !Number.isFinite(Number(bet.odds)) ||
+    Number(bet.odds) <= 1 ||
+    !Number.isFinite(Number(bet.stake)) ||
+    Number(bet.stake) < 0
+  )
+    return null;
   const status = String(bet.status ?? "open");
   if (!VALID_STATUSES.has(status)) return null;
 
+  const capture =
+    bet.capture === undefined ? undefined : normalizeCapture(bet.capture);
+  if (capture === null) return null;
   const normalized: ApiBet = {
     id: String(bet.id ?? "").slice(0, 180),
     opportunityId: String(bet.opportunityId ?? "").slice(0, 180),
@@ -56,13 +75,27 @@ function normalizeBet(value: unknown): ApiBet | null {
     odds: Math.max(1.01, toFiniteNumber(bet.odds, 1.01)),
     stake: Math.max(0, toFiniteNumber(bet.stake, 0)),
     initialEvPct: toFiniteNumber(bet.initialEvPct, 0),
-    opportunityScore: Math.min(100, Math.max(0, Math.round(toFiniteNumber(bet.opportunityScore, 0)))),
+    opportunityScore: Math.min(
+      100,
+      Math.max(0, Math.round(toFiniteNumber(bet.opportunityScore, 0))),
+    ),
     status: status as ApiBet["status"],
+    capture,
   };
 
-  if (!normalized.id || !normalized.opportunityId || !normalized.event || !normalized.market || !normalized.selection || !normalized.bookmaker) return null;
-  if (Number.isNaN(Date.parse(normalized.createdAt))) normalized.createdAt = new Date().toISOString();
-  if (!normalized.updatedAt || Number.isNaN(Date.parse(normalized.updatedAt))) normalized.updatedAt = normalized.createdAt;
+  if (
+    !normalized.id ||
+    !normalized.opportunityId ||
+    !normalized.event ||
+    !normalized.market ||
+    !normalized.selection ||
+    !normalized.bookmaker
+  )
+    return null;
+  if (Number.isNaN(Date.parse(normalized.createdAt)))
+    normalized.createdAt = new Date().toISOString();
+  if (!normalized.updatedAt || Number.isNaN(Date.parse(normalized.updatedAt)))
+    normalized.updatedAt = normalized.createdAt;
   return normalized;
 }
 
@@ -83,39 +116,40 @@ function mapRow(row: Record<string, unknown>): ApiBet {
     initialEvPct: Number(row.initial_ev_pct),
     opportunityScore: Number(row.opportunity_score),
     status: String(row.status) as ApiBet["status"],
+    capture: normalizeCapture(row.capture) || undefined,
   };
 }
 
 export async function GET(request: NextRequest) {
   const hash = ownerHash(request);
-  if (!hash) return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
+  if (!hash)
+    return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
   const pool = getDbPool();
-  if (!pool) return NextResponse.json({ error: "database_not_configured" }, { status: 503 });
+  if (!pool)
+    return NextResponse.json(
+      { error: "database_not_configured" },
+      { status: 503 },
+    );
 
   try {
     const result = await pool.query(
-      `WITH ranked AS (
-         SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
-                selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status,
-                ROW_NUMBER() OVER (
-                  PARTITION BY opportunity_id
-                  ORDER BY CASE WHEN owner_hash = $1 THEN 0 ELSE 1 END, updated_at DESC
-                ) AS rn
-           FROM public.bet_history
-          WHERE owner_hash IN ($1, $2)
-            AND LEFT(opportunity_id, LENGTH($3)) <> $3
-       )
-       SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
-              selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status
-         FROM ranked
-        WHERE rn = 1
+      `SELECT id, opportunity_id, created_at, updated_at, sport, competition, event, market,
+              selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status, capture
+         FROM public.bet_history
+        WHERE owner_hash = $1
+          AND LEFT(opportunity_id, LENGTH($2)) <> $2
         ORDER BY created_at DESC
         LIMIT 1000`,
-      [hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_PREFIX],
+      [hash, SYSTEM_PREFIX],
     );
 
     return NextResponse.json({ bets: result.rows.map(mapRow), cloud: true });
   } catch (error) {
+    if (needsTrackerUpgrade(error))
+      return NextResponse.json(
+        { error: "tracker_schema_upgrade_required" },
+        { status: 503 },
+      );
     console.error("tracker_read_failed", error);
     return NextResponse.json({ error: "tracker_read_failed" }, { status: 500 });
   }
@@ -123,12 +157,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const hash = ownerHash(request);
-  if (!hash) return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
+  if (!hash)
+    return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
   const pool = getDbPool();
-  if (!pool) return NextResponse.json({ error: "database_not_configured" }, { status: 503 });
+  if (!pool)
+    return NextResponse.json(
+      { error: "database_not_configured" },
+      { status: 503 },
+    );
 
-  const payload = await request.json().catch(() => null) as { bets?: unknown[] } | null;
-  const bets = Array.isArray(payload?.bets) ? payload!.bets.slice(0, 500).map(normalizeBet).filter(Boolean) as ApiBet[] : [];
+  const payload = (await request.json().catch(() => null)) as {
+    bets?: unknown[];
+  } | null;
+  const bets = Array.isArray(payload?.bets)
+    ? (payload!.bets
+        .slice(0, 500)
+        .map(normalizeBet)
+        .filter(Boolean) as ApiBet[])
+    : [];
   if (bets.length === 0) return NextResponse.json({ saved: 0 });
 
   const client = await pool.connect();
@@ -136,11 +182,12 @@ export async function POST(request: NextRequest) {
     await client.query("BEGIN");
     for (const bet of bets) {
       if (bet.opportunityId.startsWith(SYSTEM_PREFIX)) continue;
+      if (bet.opportunityId.startsWith("demo-")) continue;
       await client.query(
         `INSERT INTO public.bet_history
           (id, owner_hash, opportunity_id, created_at, updated_at, sport, competition, event, market,
-           selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           selection, bookmaker, odds, stake, initial_ev_pct, opportunity_score, status, capture)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
          ON CONFLICT (owner_hash, opportunity_id) DO UPDATE SET
            updated_at = EXCLUDED.updated_at,
            sport = EXCLUDED.sport,
@@ -153,11 +200,27 @@ export async function POST(request: NextRequest) {
            stake = EXCLUDED.stake,
            initial_ev_pct = EXCLUDED.initial_ev_pct,
            opportunity_score = EXCLUDED.opportunity_score,
-           status = EXCLUDED.status`,
+           status = EXCLUDED.status,
+           capture = CASE WHEN bet_history.capture = '{}'::jsonb THEN EXCLUDED.capture ELSE bet_history.capture END
+         WHERE EXCLUDED.updated_at >= bet_history.updated_at`,
         [
-          bet.id, hash, bet.opportunityId, bet.createdAt, bet.updatedAt, bet.sport, bet.competition,
-          bet.event, bet.market, bet.selection, bet.bookmaker, bet.odds, bet.stake,
-          bet.initialEvPct, bet.opportunityScore, bet.status,
+          bet.id,
+          hash,
+          bet.opportunityId,
+          bet.createdAt,
+          bet.updatedAt,
+          bet.sport,
+          bet.competition,
+          bet.event,
+          bet.market,
+          bet.selection,
+          bet.bookmaker,
+          bet.odds,
+          bet.stake,
+          bet.initialEvPct,
+          bet.opportunityScore,
+          bet.status,
+          JSON.stringify(bet.capture || {}),
         ],
       );
     }
@@ -165,6 +228,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ saved: bets.length, cloud: true });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (needsTrackerUpgrade(error))
+      return NextResponse.json(
+        { error: "tracker_schema_upgrade_required" },
+        { status: 503 },
+      );
     console.error("tracker_save_failed", error);
     return NextResponse.json({ error: "tracker_save_failed" }, { status: 500 });
   } finally {
@@ -174,18 +242,23 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const hash = ownerHash(request);
-  if (!hash) return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
+  if (!hash)
+    return NextResponse.json({ error: "invalid_tracker_key" }, { status: 401 });
   const pool = getDbPool();
-  if (!pool) return NextResponse.json({ error: "database_not_configured" }, { status: 503 });
+  if (!pool)
+    return NextResponse.json(
+      { error: "database_not_configured" },
+      { status: 503 },
+    );
   const id = request.nextUrl.searchParams.get("id")?.slice(0, 180);
   if (!id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
 
   const result = await pool.query(
     `DELETE FROM public.bet_history
       WHERE id = $1
-        AND owner_hash IN ($2, $3)
-        AND LEFT(opportunity_id, LENGTH($4)) <> $4`,
-    [id, hash, SERVER_DETECTION_OWNER_HASH, SYSTEM_PREFIX],
+        AND owner_hash = $2
+        AND LEFT(opportunity_id, LENGTH($3)) <> $3`,
+    [id, hash, SYSTEM_PREFIX],
   );
   return NextResponse.json({ deleted: result.rowCount ?? 0, cloud: true });
 }
