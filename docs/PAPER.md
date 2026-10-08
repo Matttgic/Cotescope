@@ -24,6 +24,10 @@ Exemple avec Pinnacle seul et des relevés tout frais : une estimation de 50 % d
 
 Chaque nouvelle capture conserve la version du profil, la probabilité centrale, le retrait appliqué, la probabilité utilisée et la fraction Kelly. Les versions antérieures restent compatibles.
 
+## Fréquence des cycles
+
+Chaque passage GitHub Actions lance le suivant cinq minutes après son début, même si la lecture de la source échoue. Un cron horaire redémarre la chaîne si elle s’arrête. Un seul cycle peut être actif ; les démarrages restent soumis aux délais GitHub. La variable de dépôt `PAPER_AUTO=non` arrête les passages automatiques. Les portefeuilles conservent leur historique et la date du dernier cycle réellement réussi ; aucun résultat ni relevé manquant n’est inventé.
+
 ## Mises
 
 - Quart de Kelly : `0,25 × (p × cote − 1) / (cote − 1)` lorsque l’avantage est positif. CoteScope utilise sa probabilité prudente ; le témoin utilise la probabilité de référence de son adaptateur.

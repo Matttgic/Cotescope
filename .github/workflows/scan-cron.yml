@@ -1,5 +1,8 @@
 name: CoteScope Paper Simulation
 
+# A successful cron was last followed by a gap of several hours. Each run now
+# dispatches its successor; the hourly schedule only restarts a stopped chain.
+# Set the repository variable PAPER_AUTO=non to stop all automatic cycles.
 on:
   push:
     branches: [main]
@@ -11,11 +14,12 @@ on:
       - "src/lib/betCapture.ts"
       - "src/app/api/cron/paper/**"
   schedule:
-    - cron: "2-59/5 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: cotescope-paper
@@ -23,9 +27,13 @@ concurrency:
 
 jobs:
   paper:
+    if: vars.PAPER_AUTO != 'non'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
+      - name: Record cycle start
+        id: start
+        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Wait for the paper deployment
         run: |
           for attempt in $(seq 1 18); do
@@ -50,3 +58,16 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             --max-time 55 \
             https://cotescope.vercel.app/api/cron/paper
+      - name: Schedule the next cycle
+        if: ${{ !cancelled() && vars.PAPER_AUTO != 'non' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAPER_STARTED_AT: ${{ steps.start.outputs.epoch }}
+          PAPER_REPOSITORY: ${{ github.repository }}
+        run: |
+          started=${PAPER_STARTED_AT:-$(date +%s)}
+          remaining=$(( started + 300 - $(date +%s) ))
+          if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+          # workflow_dispatch is allowed to create a new run with GITHUB_TOKEN.
+          # The workflow concurrency group keeps only one active cycle.
+          gh workflow run scan-cron.yml --repo "$PAPER_REPOSITORY" --ref main
