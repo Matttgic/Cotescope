@@ -26,7 +26,7 @@ Chaque nouvelle capture conserve la version du profil, la probabilité centrale,
 
 ## Fréquence des cycles
 
-Chaque passage GitHub Actions lance le suivant cinq minutes après son début, même si la lecture de la source échoue. Un cron horaire redémarre la chaîne si elle s’arrête. Un seul cycle peut être actif ; les démarrages restent soumis aux délais GitHub. La variable de dépôt `PAPER_AUTO=non` arrête les passages automatiques. Les portefeuilles conservent leur historique et la date du dernier cycle réellement réussi ; aucun résultat ni relevé manquant n’est inventé.
+Chaque passage GitHub Actions lance le suivant quinze minutes après son début, même si la lecture de la source échoue. Cette cadence correspond à celle du collecteur cotes-value sans synchroniser les deux chaînes : une publication peut donc être lue au passage suivant. Un cron horaire redémarre la chaîne si elle s’arrête. Un seul cycle peut être actif ; les démarrages restent soumis aux délais GitHub. La variable de dépôt `PAPER_AUTO=non` arrête les passages automatiques. Les portefeuilles conservent leur historique et la date du dernier cycle réellement réussi ; aucun résultat ni relevé manquant n’est inventé.
 
 ## Mises
 
@@ -50,7 +50,7 @@ Les trois portefeuilles disposent d’un journal complet côté base ; l’inter
 
 ## Planification et contrôle
 
-Le workflow GitHub Actions `CoteScope Paper Simulation` remplace l’ancien cron de collecte Live de ce dépôt. Il appelle `/api/cron/paper` toutes les cinq minutes, ainsi qu’après publication d’une modification du moteur paper, et peut être lancé avec **Run workflow**. La planification GitHub peut être retardée ; sa cadence n’est pas garantie. Le collecteur cotes-value conserve sa propre planification.
+Le workflow GitHub Actions `CoteScope Paper Simulation` remplace l’ancien cron de collecte Live de ce dépôt. Il appelle `/api/cron/paper` environ toutes les quinze minutes, ainsi qu’après publication d’une modification du moteur paper, et peut être lancé avec **Run workflow**. La planification GitHub peut être retardée ; sa cadence n’est pas garantie. Le collecteur cotes-value conserve sa propre planification.
 
 Prérequis : `DATABASE_URL` dans Vercel, schéma Neon à jour, et **le même `CRON_SECRET` dans Vercel et dans les secrets GitHub Actions de Cotescope**. Il s’agit d’une valeur privée aléatoire, distincte de la clé PulseScore ; ne jamais la publier dans Git ou le chat. Après ajout dans Vercel, redéployer. L’endpoint refuse les appels non autorisés avant toute lecture de source ou écriture.
 
