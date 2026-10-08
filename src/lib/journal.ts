@@ -4,6 +4,7 @@ import {
   type BetCapture,
 } from "./betCapture";
 import type { Opportunity, Sport } from "./types";
+import type { DataSource } from "./dataSource";
 
 export type BetStatus =
   "open" | "win" | "loss" | "void" | "half_win" | "half_loss";
@@ -25,6 +26,32 @@ export type Bet = {
   status: BetStatus;
   capture?: BetCapture;
 };
+
+export const JOURNAL_SOURCE_LABELS = {
+  cotescope: "CoteScope",
+  "cotes-value": "Cotes-value",
+  live: "Live",
+  demo: "Démo",
+  unknown: "Source non identifiée",
+};
+
+/** Read provenance from the saved decision, with legacy identifiers as fallback. */
+export function betSource(bet: Bet): DataSource | "unknown" {
+  if (bet.opportunityId.startsWith("demo-")) return "demo";
+  if (bet.capture?.method || bet.opportunityId.startsWith("cs-"))
+    return "cotescope";
+  if (bet.opportunityId.startsWith("cv-")) return "cotes-value";
+  if (bet.opportunityId.startsWith("v2|")) return "live";
+  return "unknown";
+}
+
+export function journalForSource(bets: Bet[], source: DataSource, all = false) {
+  return bets.filter((bet) =>
+    source !== "demo" && all
+      ? betSource(bet) !== "demo"
+      : betSource(bet) === source,
+  );
+}
 
 export function validBet(value: unknown): value is Bet {
   if (!value || typeof value !== "object") return false;
@@ -156,6 +183,7 @@ export function betsCsv(bets: Bet[]): string {
         "Cote juste à la prise",
         "Référence à la prise",
         "Horodatage du prix",
+        "Source",
       ],
       ...bets.map((b) => [
         b.createdAt,
@@ -170,6 +198,7 @@ export function betsCsv(bets: Bet[]): string {
         b.capture?.fairOdds ?? "",
         b.capture?.reference ?? "",
         b.capture?.observedAt ?? "",
+        JOURNAL_SOURCE_LABELS[betSource(b)],
       ]),
     ]
       .map((row) => row.map(cell).join(";"))

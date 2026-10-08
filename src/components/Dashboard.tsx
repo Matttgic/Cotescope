@@ -1,7 +1,14 @@
 "use client";
 import { arbitrageRoiPct, arbitrageStakes } from "@/lib/arbitrage";
 import { money, number, percent, shortTime, time } from "@/lib/format";
-import { betsCsv, createBet, journalStats, type Bet } from "@/lib/journal";
+import {
+  betsCsv,
+  createBet,
+  journalStats,
+  journalForSource,
+  JOURNAL_SOURCE_LABELS,
+  type Bet,
+} from "@/lib/journal";
 import {
   DEFAULT_FILTERS,
   filterOpportunities,
@@ -62,6 +69,7 @@ export default function Dashboard({
   const [bankroll, setBankroll] = useState(1000);
   const [toast, setToast] = useState("");
   const [journalFilter, setJournalFilter] = useState("all");
+  const [allJournalSources, setAllJournalSources] = useState(false);
   const [arbOdds, setArbOdds] = useState([2.12, 2.02]);
   const [arbStake, setArbStake] = useState(100);
   const [arbs, setArbs] = useState<
@@ -182,8 +190,18 @@ export default function Dashboard({
   const demoBets = journal.bets.filter((b) =>
     b.opportunityId.startsWith("demo-"),
   );
-  const displayedBets = isDemo ? demoBets : personal;
+  const journalDemo = mode === "demo";
+  const displayedBets = journalForSource(journal.bets, mode, allJournalSources);
+  const journalSourceLabel =
+    !journalDemo && allJournalSources
+      ? "Toutes les sources"
+      : JOURNAL_SOURCE_LABELS[mode];
+  const otherSourceCount = journalDemo
+    ? 0
+    : personal.length - journalForSource(personal, mode).length;
   const stats = journalStats(displayedBets);
+  // The shared bankroll still reserves stakes from every personal source.
+  const totalExposure = journalStats(journalDemo ? demoBets : personal).exposure;
   const methodExposure = selected?.method
     ? personal
         .filter(
@@ -228,7 +246,7 @@ export default function Dashboard({
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "cotescope-" + (isDemo ? "demo" : "journal") + ".csv";
+    link.download = "cotescope-" + (journalDemo ? "demo" : "journal") + ".csv";
     link.click();
     URL.revokeObjectURL(url);
     notify(displayedBets.length + " pari(s) exporté(s).");
@@ -237,7 +255,8 @@ export default function Dashboard({
     const data = {
       schema: "cotescope.journal.v2",
       exportedAt: new Date().toISOString(),
-      demo: isDemo,
+      demo: journalDemo,
+      source: !journalDemo && allJournalSources ? "all" : mode,
       bets: displayedBets,
     };
     const url = URL.createObjectURL(
@@ -246,7 +265,7 @@ export default function Dashboard({
     const link = document.createElement("a");
     link.href = url;
     link.download =
-      "cotescope-preuves-" + (isDemo ? "demo" : "journal") + ".json";
+      "cotescope-preuves-" + (journalDemo ? "demo" : "journal") + ".json";
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -259,7 +278,7 @@ export default function Dashboard({
       !Number.isFinite(stake) ||
       stake <= 0 ||
       (selected.method && (methodExposure > 0 || stake > bankroll * 0.01)) ||
-      stake > bankroll - stats.exposure
+      stake > bankroll - totalExposure
     )
       return;
     journal.update([createBet(selected, stake), ...journal.bets]);
@@ -368,6 +387,8 @@ export default function Dashboard({
                 ? "Test automatique virtuel"
                 : engineView
                   ? "Simulations cotes-value"
+                  : nav === "Journal" || (nav === "Performance" && performanceView === "journal")
+                    ? "Journal · " + journalSourceLabel
                   : loading
                     ? "Actualisation"
                     : isDemo
@@ -430,7 +451,7 @@ export default function Dashboard({
                 {nav === "Scanner"
                   ? "Comparez les cotes. Comprenez l’écart. Décidez avec méthode."
                   : nav === "Journal"
-                    ? "Vos prises de position, vos mises et vos résultats. Rien d’automatique."
+                    ? "Vos prises enregistrées, leurs mises et leurs résultats, par source."
                     : nav === "Performance"
                       ? engineView
                         ? "Les simulations publiées, leurs résultats et les clôtures vérifiables."
@@ -465,6 +486,7 @@ export default function Dashboard({
                   aria-pressed={mode === "cotescope"}
                   onClick={() => {
                     setMode("cotescope");
+                    setAllJournalSources(false);
                     setSelected(null);
                   }}
                 >
@@ -475,6 +497,7 @@ export default function Dashboard({
                   aria-pressed={mode === "demo"}
                   onClick={() => {
                     setMode("demo");
+                    setAllJournalSources(false);
                     setSelected(null);
                   }}
                 >
@@ -485,6 +508,7 @@ export default function Dashboard({
                   aria-pressed={mode === "live"}
                   onClick={() => {
                     setMode("live");
+                    setAllJournalSources(false);
                     setSelected(null);
                   }}
                 >
@@ -495,6 +519,7 @@ export default function Dashboard({
                   aria-pressed={mode === "cotes-value"}
                   onClick={() => {
                     setMode("cotes-value");
+                    setAllJournalSources(false);
                     setSelected(null);
                   }}
                 >
@@ -518,7 +543,7 @@ export default function Dashboard({
               )}
             </div>
           )}
-          {feedView && mode === "cotescope" && diagnostics && (
+          {nav === "Scanner" && mode === "cotescope" && diagnostics && (
             <details className="panel decision-diagnostics">
               <summary>
                 {diagnostics.selected} sélection(s) CoteScope ·{" "}
@@ -578,7 +603,11 @@ export default function Dashboard({
           )}
           {nav === "Journal" && (
             <JournalView
-              isDemo={isDemo}
+              isDemo={journalDemo}
+              sourceLabel={journalSourceLabel}
+              otherSourceCount={otherSourceCount}
+              allSources={allJournalSources}
+              setAllSources={setAllJournalSources}
               displayedBets={displayedBets}
               stats={stats}
               journal={journal}
@@ -595,7 +624,7 @@ export default function Dashboard({
             <PerformanceView
               view={performanceView}
               setView={setPerformanceView}
-              isDemo={isDemo}
+              isDemo={journalDemo}
               displayedBets={displayedBets}
               stats={stats}
               setNav={setNav}
@@ -816,7 +845,7 @@ export default function Dashboard({
                 désactivé.
               </div>
             )}
-            {stake > bankroll - stats.exposure && (
+            {stake > bankroll - totalExposure && (
               <p className="text-danger">
                 La mise dépasse la bankroll disponible après exposition.
               </p>
@@ -840,7 +869,7 @@ export default function Dashboard({
                 !journal.loaded ||
                 !Number.isFinite(stake) ||
                 stake <= 0 ||
-                stake > bankroll - stats.exposure
+                stake > bankroll - totalExposure
               }
               onClick={record}
             >

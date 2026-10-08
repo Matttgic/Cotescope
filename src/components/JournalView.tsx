@@ -1,5 +1,12 @@
 import { money, number, percent, statuses, time } from "@/lib/format";
-import { journalStats, profit, type Bet, type BetStatus } from "@/lib/journal";
+import {
+  journalStats,
+  profit,
+  betSource,
+  JOURNAL_SOURCE_LABELS,
+  type Bet,
+  type BetStatus,
+} from "@/lib/journal";
 import Icon from "./Icon";
 import EvidenceView from "./EvidenceView";
 import Stat from "./Stat";
@@ -7,6 +14,10 @@ import type { useJournal } from "./useJournal";
 
 type Props = {
   isDemo: boolean;
+  sourceLabel: string;
+  otherSourceCount: number;
+  allSources: boolean;
+  setAllSources: (value: boolean) => void;
   displayedBets: Bet[];
   stats: ReturnType<typeof journalStats>;
   journal: ReturnType<typeof useJournal>;
@@ -20,6 +31,10 @@ type Props = {
 };
 export default function JournalView({
   isDemo,
+  sourceLabel,
+  otherSourceCount,
+  allSources,
+  setAllSources,
   displayedBets,
   stats,
   journal,
@@ -40,7 +55,7 @@ export default function JournalView({
           detail={
             isDemo
               ? "Journal de simulation séparé"
-              : "Prises ajoutées volontairement"
+              : "Prises enregistrées · " + sourceLabel
           }
           icon="journal"
         />
@@ -67,7 +82,7 @@ export default function JournalView({
       <section className="panel">
         <div className="section-heading">
           <div>
-            <h2>{isDemo ? "Journal de démonstration" : "Votre journal"}</h2>
+            <h2>{isDemo ? "Journal de démonstration" : "Votre journal · " + sourceLabel}</h2>
             <p>
               {isDemo
                 ? "Ces simulations ne sont jamais envoyées au cloud."
@@ -108,6 +123,25 @@ export default function JournalView({
             {journal.cloudError}
           </p>
         )}
+        {!isDemo && (
+          <div className="notice">
+            <label>
+              <input
+                type="checkbox"
+                checked={allSources}
+                onChange={(event) => setAllSources(event.target.checked)}
+              />{" "}
+              Afficher toutes les sources
+            </label>
+            <p>
+              {allSources
+                ? "Chaque prise indique sa source. Les compteurs et les exports couvrent toutes les sources."
+                : "Les prises, les compteurs et les exports correspondent à la source sélectionnée."}
+              {!allSources && otherSourceCount > 0 &&
+                ` ${otherSourceCount} prise(s) conservée(s) dans les autres sources.`}
+            </p>
+          </div>
+        )}
         <p className="fine-print">
           Les demi-gains et demi-pertes utilisent la moitié du gain ou de la
           perte. Le ROI du journal exclut les remboursements complets ; le bilan
@@ -145,6 +179,11 @@ export default function JournalView({
                 <h3>{bet.event}</h3>
                 <p>
                   {bet.selection} · {bet.bookmaker} · @{number(bet.odds, 2)}
+                </p>
+                <p className="event-meta">
+                  Source : {JOURNAL_SOURCE_LABELS[betSource(bet)]}
+                  {bet.capture?.method?.version === "robust-v1" && " · Méthode robuste"}
+                  {bet.capture?.method?.version === "balanced-v1" && " · Méthode équilibrée"}
                 </p>
               </div>
               <label>
@@ -239,7 +278,7 @@ export default function JournalView({
         {!displayedBets.length && (
           <div className="empty-state">
             <Icon name="journal" size={32} />
-            <h3>Votre journal est une page blanche.</h3>
+            <h3>Aucune prise enregistrée · {sourceLabel}.</h3>
             <p>
               Ouvrez une opportunité dans le scanner et ajoutez votre prise.
             </p>
